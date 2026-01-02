@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **NSE Quant Research & AI-Native Data Platform** is a **research-first data infrastructure system** built for working with Indian equity market data from the **:contentReference[oaicite:0]{index=0} (NSE)**.
+The **Quant Research & AI-Native Data Platform** is a **research-first data infrastructure system** built for working with Indian equity market data from the **:contentReference[oaicite:0]{index=0} (NSE)**.
 
 The platform prioritizes:
 - Data correctness
@@ -221,9 +221,4 @@ These exclusions are intentional design decisions.
 
 ## Summary
 
-> This platform is designed for **researchers and engineers who value correctness, reproducibility, and clarity**, rather than speed, hype, or execution.
-
-This positioning makes the project:
-- Strong for FAANG / Staff Data roles
-- Credible for quant research teams
-- Safe and honest for open-source publication
+> This platform is designed for **researchers and engineers who value correctness, reproducibility, and clarity**, rather than speed, hype, or execution. 
