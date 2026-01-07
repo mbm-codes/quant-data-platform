@@ -1,8 +1,7 @@
 import os
 from pyspark.sql import SparkSession
 
-
-print("PACKAGE:", __package__)
+#Use of simple factory, singleton design pattern
 
 # TBD : Use this config class to have all configs in one place 
 class SparkSessionConfig:
