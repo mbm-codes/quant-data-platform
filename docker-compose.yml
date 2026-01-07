@@ -1,0 +1,30 @@
+#TBD - this is an effort to use hive metastore to use trino to initialize the environment/db
+
+services:
+  metastore-db:
+    image: postgres:14
+    container_name: metastore-db
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    ports:
+      - "5432:5432"
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    depends_on:
+      - metastore-db
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      HIVE_METASTORE_DB_TYPE: postgres
+      POSTGRES_HOST: metastore-db
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - /Users/mihirmehta/project_dir/qdp/warehouse:/warehouse
+    ports:
+      - "9083:9083"
