@@ -13,7 +13,10 @@ WAREHOUSE_PATH = "/Users/mihirmehta/Desktop/Study/projects/quant-data-platform/w
 CATALOG_NAME = "local"
 APP_NAME = "qdp-env-init"
 
-spark = SparkSessionBuilder().get_spark()
+spark = SparkSessionBuilder(
+    app_name="qdp-local",
+    environment="local",
+).get_spark()
 
 
 os.makedirs(WAREHOUSE_PATH, exist_ok=True)
