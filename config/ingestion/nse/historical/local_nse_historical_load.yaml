@@ -1,0 +1,38 @@
+# config/local_historical_load.yaml
+
+pipeline_version: "v1.0"
+process_name: "nse_historical_load"
+run_id: "1"
+process_id: "job_nse_historical_load"
+
+# Input files (local path)
+input_pattern: "/Users/mihirmehta/Desktop/Study/projects/quant-data-platform/data_sources/nse/hist_files/*.csv.gz"
+
+# Output Iceberg table
+output_table: "local.market_lakehouse.bronze_nse_historical_prices_raw"
+
+# Static columns added to all rows
+static_columns:
+  exchange: NSE
+  data_src: kaggle_historical
+
+# Column type casting
+casts:
+  open: ["open_price", "double"]
+  high: ["high_price", "double"]
+  low: ["low_price", "double"]
+  close: ["close_price", "double"]
+  volume: ["volume_qty", "bigint"]
+
+schema:
+  raw:
+    strict: true
+  output:
+    strict: true
+
+
+
+
+# Logging paths
+app_log_file: "./logs/local_job_nse_historical_load_app.log"
+spark_log_file: "./logs/local_job_nse_historical_load_spark.log"

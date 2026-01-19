@@ -1,0 +1,24 @@
+input_pattern: "dummy"
+output_table: "dummy.table"
+process_name: "test_pipeline"
+process_id: "test_process"
+run_id: "1"
+pipeline_version: "v1"
+
+casts:
+  open: ["open_price", "double"]
+  high: ["high_price", "double"]
+  low: ["low_price", "double"]
+  close: ["close_price", "double"]
+  volume: ["volume_qty", "bigint"]
+
+  
+static_columns:
+  exchange: "NSE"
+  data_src: "kaggle_historical"
+
+schema:
+  raw:
+    strict: true
+  output:
+    strict: true
