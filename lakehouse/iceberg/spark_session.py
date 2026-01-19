@@ -1,6 +1,11 @@
 import os
 from pyspark.sql import SparkSession
 
+
+# macOS: Force PySpark to use the correct Java 11
+# os.environ["JAVA_HOME"] = "/opt/homebrew/opt/openjdk@11/libexec/openjdk.jdk/Contents/Home"
+# os.environ["PATH"] = os.environ["JAVA_HOME"] + "/bin:" + os.environ.get("PATH", "")
+
 #Use of simple factory, singleton design pattern
 
 # TBD : Use this config class to have all configs in one place 
@@ -56,19 +61,25 @@ class SparkSessionBuilder:
                         f"spark.sql.catalog.{self.catalog_name}.warehouse",
                         self.warehouse_path,
                     )
-                    .config(
-                        "spark.driver.extraJavaOptions",
-                        "-Djava.security.manager=allow"
-                    )
-                    .config(
-                        "spark.executor.extraJavaOptions",
-                        "-Djava.security.manager=allow"
-                    )
+                    # Required for Java 17+
+                    # .config(
+                    #     "spark.driver.extraJavaOptions",
+                    #     "-Djava.security.manager=allow"
+                    # )
+                    # .config(
+                    #     "spark.executor.extraJavaOptions",
+                    #     "-Djava.security.manager=allow"
+                    # )
                     .config("spark.driver.memory", "6g")
                     .config("spark.executor.memory", "6g")
                     .config("spark.sql.shuffle.partitions", "200")
                     .config("spark.sql.parquet.block.size", 64 * 1024 * 1024)
                     .config("spark.sql.parquet.compression.codec", "snappy")
+                    .config("spark.app.env", "local")
+                    .config("spark.sql.iceberg.write.target-file-size-bytes", 256 * 1024 * 1024)
+                    .config("spark.sql.adaptive.enabled", True)
+                    .config("spark.sql.adaptive.coalescePartitions.enabled", True)
+
                     # .config("spark.eventLog.enabled", "true")
                     # .config("spark.eventLog.dir", "file:///tmp/spark-events")
 
