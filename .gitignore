@@ -28,6 +28,7 @@ MANIFEST
 qdp_env/
 warehouse/
 data_sources/nse/hist_files
+data_sources/nse/nse_bhavcopy_from_nov_2023
 *.DS_Store*
 # PyInstaller
 #  Usually these files are written by a python script from a template
