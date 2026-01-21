@@ -2,7 +2,6 @@
 import os
 from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline
 from common.logging.logging import QDPLogger
-from tests.conftest import spark_session as spark
 
 
 def test_pipeline_end_to_end(spark, tmp_path):

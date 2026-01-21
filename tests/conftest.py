@@ -5,7 +5,7 @@ warehouse_path = "./warehouse"
 catalog_name = "local"
 
 @pytest.fixture(scope="session")
-def spark_session():
+def spark():
     """
     Pytest fixture to create a SparkSession for testing.
     """
