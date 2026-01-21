@@ -21,11 +21,3 @@ def cast_and_rename_columns(df, cast_rename_config ):
                 else:
                     df = df.withColumn(dst_col, sf.col(src_col).cast(dtype)).drop(src_col)
     return df
-
-def safe_count(df, logger=None):
-    try:
-        return df.count()
-    except Exception as e:
-        if logger:
-            logger.warning(f"Error counting records: {e}")
-        return None

@@ -21,6 +21,7 @@ from platform.pipeline.factory import PipelineFactory
 from platform.quality.checks import DataQualityChecks
 from platform.config.loader import load_config
 from platform.spark_dataframe.transforms import normalize_column_names
+from platform.spark_dataframe.actions import safe_count
 
     
 # ==========================
@@ -88,18 +89,6 @@ create_table_ddl = """
         PARTITIONED BY (trade_year);
     """
 
-
-
-
-
-
-def safe_count(df, logger=None):
-    try:
-        return df.count()
-    except Exception as e:
-        if logger:
-            logger.warning(f"Error counting records: {e}")
-        return None
 # ==========================
 # Historical Data Pipeline
 # ==========================
