@@ -30,7 +30,13 @@ schema:
   output:
     strict: true
 
-
+data_quality_checks:
+  raw_input:
+    no_nulls_except: []
+    positive_values: ["open", "close", "high", "low", "volume"]
+  output:
+    no_nulls_except: []
+    positive_values: ["open_price", "close_price", "high_price", "low_price", "volume_qty"]
 
 
 # Logging paths

@@ -1,5 +1,15 @@
+# This module implements the NSE Historical Data Pipeline
+# It reads historical stock price data from CSV files,
+# transforms it, enforces schema contracts, performs data quality checks,
+# and loads it into an Iceberg table in a data lakehouse.
+# The pipeline is configurable per environment (local, dev, prod).
+# Key features include schema enforcement with strict and non-strict modes,
+# metadata enrichment, and post-load cleanup of Iceberg snapshots and orphan files.
+# Note - The source data is entire NSE historical data until 2023-10-31  
+
 import os
 import yaml
+import copy
 from datetime import datetime, timedelta, timezone
 from pyspark.sql import functions as sf
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
@@ -8,12 +18,14 @@ from common.logging.logging import QDPLogger
 from ingestion.common.processing_metadata import create_process_context, process_context_to_string
 from common.pipeline_base import PipelineBase
 from common.pipeline_factory import PipelineFactory
+from common.dq_checks import DataQualityChecks
+from common.config import load_config
+from common.df_transform import normalize_column_names
 
+    
 # ==========================
-# Load configuration per environment
+# Schemas and DDLs
 # ==========================
-ENV = os.getenv("QDP_ENV", "local")  # local/dev/prod
-CONFIG_FILE = f"./config/ingestion/nse/historical/{ENV}_nse_historical_load.yaml"
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -76,17 +88,18 @@ create_table_ddl = """
         PARTITIONED BY (trade_year);
     """
 
-with open(CONFIG_FILE, "r") as f:
-    CONFIG = yaml.safe_load(f)
-
-RAW_SCHEMA_STRICT = CONFIG["schema"]["raw"]["strict"]
-OUTPUT_SCHEMA_STRICT = CONFIG["schema"]["output"]["strict"]
 
 
-def normalize_column_names(df):
-    return df.select([sf.col(c).alias(c.lower().replace(" ", "_")) for c in df.columns])
 
-    
+
+
+def safe_count(df, logger=None):
+    try:
+        return df.count()
+    except Exception as e:
+        if logger:
+            logger.warning(f"Error counting records: {e}")
+        return None
 # ==========================
 # Historical Data Pipeline
 # ==========================
@@ -96,6 +109,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
         self.logger = logger
         self.config = config
         self.table_name = config["output_table"]
+        self.raw_schema_strict = config["schema"]["raw"]["strict"]
+        self.output_schema_strict = config["schema"]["output"]["strict"]
 
     # --------------------------
     # ETL Steps
@@ -116,11 +131,19 @@ class NSEHistoricalDataPipeline(PipelineBase):
             self.logger.debug(f"Input schema: {df.schema.simpleString()}")
           
             df = normalize_column_names(df)
-            df = self.enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=RAW_SCHEMA_STRICT, stage="raw_input")
+            df, missing_cols_added = self.enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
+            # --------------------------
+            # Data Quality Checks
+            # --------------------------
+            dq = DataQualityChecks(logger=self.logger)
+            dq.assert_no_nulls(df, [c for c in df.columns if c not in missing_cols_added ])
+            dq.assert_positive_values(df, self.config.get("data_quality_checks", {}).get("raw_input", {}).get("positive_values", []))
+            self.logger.info(f"Data quality metrics: {dq.metrics} ")
+
             return df
         except Exception as e:
-            self.logger.error(f"Error reading historical files: {e}")
-            raise e
+            self.logger.error(f"Failed to extract historical data: {e}")
+            raise ValueError("Extraction failed") from e
        
 
     def transform(self, df, ctx):
@@ -131,25 +154,27 @@ class NSEHistoricalDataPipeline(PipelineBase):
             
             df = self._add_metadata(df, ctx)
 
-            df = self.enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=OUTPUT_SCHEMA_STRICT, stage="output")
+            df, _ = self.enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
 
+           
             self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-
+            return df
         except Exception as e:
             self.logger.error(f"Error transforming historical data: {e}")
             raise
-        return df
-
-    def load(self, df):
-       
         
 
+    def load(self, df):
+        record_count = safe_count(df, logger=self.logger)
+        self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
+
+        if record_count is None or record_count == 0:
+            self.logger.warning("No records to write. Skipping load step.")
+            return
+        
         try:
             df.writeTo(self.table_name).overwrite(sf.expr("true"))
-            record_count = df.count()
-            self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
             self.logger.info(f"Successfully wrote {record_count:,} records")
-           
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
@@ -200,15 +225,20 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
     def _add_metadata(self, df, ctx):
        # Metadata enrichment
-        df = df.withColumn("source_file", sf.input_file_name())
-        df = df.withColumn("ingestion_ts", sf.lit(ctx.process_timestamp))
-        df = df.withColumn("execution_date", sf.lit(ctx.process_date))
-        df = df.withColumn("run_id", sf.lit(ctx.run_id))
-        df = df.withColumn("job_name", sf.lit(ctx.process_name))
-        df = df.withColumn("process_id", sf.lit(ctx.process_id))
-        df = df.withColumn("pipeline_version", sf.lit(ctx.pipeline_version))
-        df = df.withColumn("is_backfill", sf.lit(ctx.is_backfill))
-        df = df.withColumn("trade_year", sf.year("trade_date"))
+        meta_cols = {
+            "source_file": sf.input_file_name(),
+            "ingestion_ts": sf.lit(ctx.process_timestamp),
+            "execution_date": sf.lit(ctx.process_date),
+            "run_id": sf.lit(ctx.run_id),
+            "job_name": sf.lit(ctx.process_name),
+            "process_id": sf.lit(ctx.process_id),
+            "pipeline_version": sf.lit(ctx.pipeline_version),
+            "is_backfill": sf.lit(ctx.is_backfill),
+            "trade_year": sf.year("trade_date")
+        }
+        for col, expr in meta_cols.items():
+            df = df.withColumn(col, expr)
+
         return df
     
     def enforce_schema(self, df, schema, logger=None, strict=True, stage="unknown"):
@@ -229,6 +259,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
         extra_cols = actual_cols - expected_cols
         missing_cols = expected_cols - actual_cols
 
+        missing_cols_added = []
+
         if strict:
             errors = []
             if missing_cols:
@@ -242,12 +274,13 @@ class NSEHistoricalDataPipeline(PipelineBase):
                 raise ValueError(msg)
 
             # Column order enforcement
-            return df.select([f.name for f in schema])
+            return df.select([f.name for f in schema]), missing_cols_added
         # ---------------------------
         # STRICT MODE: FALSE
         # ---------------------------
 
         for field in missing_cols:
+            missing_cols_added.append(field)
             df = df.withColumn(field, sf.lit(None).cast(schema[field].dataType))
             if logger:
                 logger.warning(f"[{stage}] Missing column added as null: {field}")
@@ -257,7 +290,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
                 logger.warning(f"[{stage}] Extra columns dropped: {sorted(extra_cols)}")
             df = df.drop(*extra_cols)
         
-        return df.select([f.name for f in schema])
+        return df.select([f.name for f in schema]), missing_cols_added
     
     def _post_etl_cleanup(self, ctx):
         try:
@@ -273,7 +306,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
             self.spark.sql(f"""
                 CALL local.system.expire_snapshots(
-                    table => 'market_lakehouse.intgr_bronze_nse_historical_prices_raw',
+                    table => '{self.table_name}',
                     older_than => TIMESTAMP '{timestamp_str}',
                     retain_last => 1
                 )
@@ -281,48 +314,79 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
             self.spark.sql(f"""
                 CALL local.system.remove_orphan_files(
-                    table => 'market_lakehouse.intgr_bronze_nse_historical_prices_raw',
+                    table => '{self.table_name}',
                     older_than => TIMESTAMP '{timestamp_str}'
                 )
             """)
         except Exception as e:
             self.logger.error(f"Error during post-etl cleanup: {e}")
-            raise
+            raise e
 
 
 
 # ==========================
 # Main entrypoint
 # ==========================
-if __name__ == "__main__":
+def main():
+    # ==========================
+    # Environment setup
+    # ==========================
+    
+    ENV = os.getenv("QDP_ENV", "local")
+    conf_file = f"./config/ingestion/nse/historical/{ENV}_nse_historical_load.yaml"
+    CONFIG = load_config(ENV, conf_file)
+    
+    # Compute log paths early
+    app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_historical_load_app.log"
+    spark_log_file = CONFIG.get("spark_log_file") or f"./logs/{ENV}_historical_load_spark.log"
+
+    # ==========================
     # Initialize logger
+    # ==========================
     logger = QDPLogger(
         name=f"{ENV}_historical_load",
-        app_log_file=CONFIG.get("app_log_file"),
-        spark_log_file=CONFIG.get("spark_log_file"),
+        app_log_file=app_log_file,
+        spark_log_file=spark_log_file,
         level=QDPLogger.INFO
     )
+
+    spark = None
     try:
+        # ==========================
+        # Initialize Spark Session
+        # ==========================
+        warehouse_path = CONFIG.get("warehouse_path", "./warehouse")
+        catalog_name = CONFIG.get("catalog_name", "local")
+
         spark = SparkSessionBuilder(
-                    app_name="qdp-local",
-                    environment="local",
-                ).get_spark()
-
-        # Environment-aware log paths
-        app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_historical_load_app.log"
-        spark_log_file = CONFIG.get("spark_log_file") or f"./logs/{ENV}_historical_load_spark.log"
-
-        
+            app_name=f"qdp-{ENV}-nse-historical-load",
+            environment=ENV,
+            warehouse_path=warehouse_path,
+            catalog_name=catalog_name
+        ).get_spark()
+            
         logger.attach_spark_logs(spark)
+        start_ts = datetime.now(timezone.utc)
+        logger.info(f"Starting historical data load [{ENV}] at {start_ts}")
 
-        logger.info(f"Starting historical data load [{ENV}] at {datetime.now(timezone.utc)}")
-
-        pipeline = PipelineFactory.get_pipeline("nse_historical", spark, logger, CONFIG)
+        # ==========================
+        # Create pipeline and run
+        # ==========================
+        pipeline = PipelineFactory.get_pipeline("nse_historical", spark, logger, copy.deepcopy(CONFIG))
         pipeline.run()
 
-        logger.info(f"Ending historical data load [{ENV}] at {datetime.now(timezone.utc)}")
+
+        end_ts = datetime.now(timezone.utc)
+        duration = (end_ts - start_ts).total_seconds()
+        logger.info(f"Ending historical data load [{ENV}] at {end_ts.isoformat()} | (Duration: {duration}s)")
+
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise
     finally:
-        spark.stop()
+        if spark:
+            spark.stop()
+            logger.info("Spark session stopped.")
+
+if __name__ == "__main__":
+    main()
