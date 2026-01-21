@@ -7,16 +7,16 @@ from datetime import datetime, timedelta, timezone
 import gzip
 import time
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from common.pipeline_base import PipelineBase
-from common.pipeline_factory import PipelineFactory
-from common.config import load_config
-from common.logging.logging import QDPLogger
+from platform.pipeline.base import PipelineBase
+from platform.pipeline.factory import PipelineFactory
+from platform.config.loader import load_config
+from platform.logging.logging import QDPLogger
 from pyspark.sql import functions as sf
 from pyspark.sql.types import StringType, StructField, StructType, DateType, DoubleType, LongType
-from common.df_transform import normalize_column_names, standardize_date, cast_and_rename_columns, safe_count
+from platform.spark_dataframe.transforms import normalize_column_names, standardize_date, cast_and_rename_columns, safe_count
 import copy
 import random
-from common.dq_checks import DataQualityChecks
+from platform.quality.checks import DataQualityChecks
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([

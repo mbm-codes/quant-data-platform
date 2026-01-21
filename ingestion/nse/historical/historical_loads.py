@@ -14,13 +14,13 @@ from datetime import datetime, timedelta, timezone
 from pyspark.sql import functions as sf
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from common.logging.logging import QDPLogger
+from platform.logging.logging import QDPLogger
 from ingestion.common.processing_metadata import create_process_context, process_context_to_string
-from common.pipeline_base import PipelineBase
-from common.pipeline_factory import PipelineFactory
-from common.dq_checks import DataQualityChecks
-from common.config import load_config
-from common.df_transform import normalize_column_names
+from platform.pipeline.base import PipelineBase
+from platform.pipeline.factory import PipelineFactory
+from platform.quality.checks import DataQualityChecks
+from platform.config.loader import load_config
+from platform.spark_dataframe.transforms import normalize_column_names
 
     
 # ==========================

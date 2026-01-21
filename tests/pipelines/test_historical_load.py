@@ -1,7 +1,8 @@
 from pyspark.sql import Row
-from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA, normalize_column_names
+from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA
 from ingestion.common.processing_metadata import create_process_context
-from common.logging.logging import QDPLogger
+from platform.logging.logging import QDPLogger
+from platform.spark_dataframe.transforms import normalize_column_names
 
 import yaml
 import gzip
