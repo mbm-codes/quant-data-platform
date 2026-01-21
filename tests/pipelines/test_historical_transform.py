@@ -1,21 +1,28 @@
-import yaml
 from pyspark.sql import Row
 from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA
 from ingestion.common.processing_metadata import create_process_context
 from common.logging.logging import QDPLogger
-from tests.conftest import spark_session as spark
+
+import yaml
 import gzip
 import shutil
+import pytest
+
+
+# spark fixture is defined in tests/conftest.py
+# never import a fixture directly; pytest handles it
+@pytest.fixture
+def pipeline(spark):
+    config = load_test_config()
+    logger = QDPLogger(name="test_logger", level=QDPLogger.DEBUG)
+    return NSEHistoricalDataPipeline(spark, logger, config)
+
 
 def load_test_config():
     with open("tests/configs/test_nse_config.yaml") as f:
         return yaml.safe_load(f)
 
-def test_transform_renames_and_casts(spark):
-    config = load_test_config()
-    logger = QDPLogger(name="test_logger", level=QDPLogger.DEBUG)
-
-    pipeline = NSEHistoricalDataPipeline(spark, logger, config)
+def test_transform_renames_and_casts(pipeline, spark):
     
     input_data = [
         Row(date="2022-01-01", open="100.5", high="110.0", low="99.5", close="105.0", volume="1000", dividends="0.0", stock_splits="0"),
@@ -37,12 +44,17 @@ def test_transform_renames_and_casts(spark):
     transformed_df = pipeline.transform(input_df, ctx)
     result = transformed_df.collect()
 
-    assert transformed_df.schema["trade_date"].dataType.simpleString() == "date"
-    assert transformed_df.schema["open_price"].dataType.simpleString() == "double"
-    assert transformed_df.schema["high_price"].dataType.simpleString() == "double"
-    assert transformed_df.schema["low_price"].dataType.simpleString() == "double"
-    assert transformed_df.schema["close_price"].dataType.simpleString() == "double"
-    assert transformed_df.schema["volume_qty"].dataType.simpleString() == "bigint"
+    expected_types = {
+        "trade_date": "date",
+        "open_price": "double",
+        "high_price": "double",
+        "low_price": "double",
+        "close_price": "double",
+        "volume_qty": "bigint",
+    }
+
+    for col, dtype in expected_types.items():
+        assert transformed_df.schema[col].dataType.simpleString() == dtype
 
     assert result[0]["trade_date"].isoformat() == "2022-01-01"
     assert result[0]["open_price"] == 100.5
@@ -51,17 +63,14 @@ def test_transform_renames_and_casts(spark):
     assert result[0]["close_price"] == 105.0
     assert result[0]["volume_qty"] == 1000
 
-def test_transform_missing_column_creates_null(spark):
-    config = load_test_config()
-    logger = QDPLogger(name="test_logger", level=QDPLogger.DEBUG)
-
-    pipeline = NSEHistoricalDataPipeline(spark, logger, config)
+def test_transform_missing_column_creates_null(pipeline, spark):
+    
 
     input_data = [
         Row(date="2022-01-01"),
     ]
     input_df = spark.createDataFrame(input_data)
-    input_df = pipeline.enforce_schema(input_df, RAW_INPUT_SCHEMA, logger=logger, strict=False, stage="raw_input")
+    input_df = pipeline.enforce_schema(input_df, RAW_INPUT_SCHEMA, logger=pipeline.logger, strict=False, stage="raw_input")
 
     ctx = create_process_context(
         pipeline_version="v1.0",
@@ -75,16 +84,13 @@ def test_transform_missing_column_creates_null(spark):
     )
 
     transformed_df = pipeline.transform(input_df, ctx)
-    result = transformed_df.collect()
+    result = transformed_df.first()
 
-    assert result[0].open_price is None
-    assert result[0].close_price is None
+    assert result.open_price is None
+    assert result.close_price is None
 
-def test_metadata_columns_added(spark):
-    config = load_test_config()
-    logger = QDPLogger(name="test_logger", level=QDPLogger.DEBUG)
-
-    pipeline = NSEHistoricalDataPipeline(spark, logger, config)
+def test_metadata_columns_added(pipeline, spark):
+    
 
     input_data = [
         Row(date="2022-01-01", open="100.5", high="110.0", low="99.5", close="105.0", volume="1000", dividends="0.0", stock_splits="0"),
@@ -111,7 +117,7 @@ def test_metadata_columns_added(spark):
         assert col in transformed_df.columns
 
 
-def test_error_reading_historical_csv_files(spark, tmp_path):
+def test_extract_raises_on_schema_mismatch(pipeline, tmp_path):
     data = "invalid_header1,invalid_header2\nvalue1,value2\n"
     file = tmp_path / "invalid_test.csv"
     file.write_text(data)
@@ -121,15 +127,12 @@ def test_error_reading_historical_csv_files(spark, tmp_path):
             shutil.copyfileobj(f_in, f_out)
 
 
-    config = load_test_config()
-    config["input_pattern"] = str(file)
-
-    logger = QDPLogger(name="test_logger", level=QDPLogger.DEBUG)
-    pipeline = NSEHistoricalDataPipeline(spark, logger, config)
-
-    expected_error_msg = """[raw_input] Schema validation failed: [raw_input] Missing columns: ['close', 'date', 'dividends', 'high', 'low', 'open', 'stock_splits', 'volume']; [raw_input] Extra columns: ['invalid_header1', 'invalid_header2']"""
-                                
-    try:
+    pipeline.config["input_pattern"] = str(file)+".gz"
+    
+    with pytest.raises(ValueError) as excinfo:
         df = pipeline.extract()
-    except Exception as e:
-        assert expected_error_msg in str(e)
+    
+    msg = str(excinfo.value)
+    assert "Schema validation failed" in msg
+    assert "Missing columns" in msg
+    assert "Extra columns" in msg

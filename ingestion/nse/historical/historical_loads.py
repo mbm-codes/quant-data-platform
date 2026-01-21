@@ -8,7 +8,7 @@ from common.logging.logging import QDPLogger
 from ingestion.common.processing_metadata import create_process_context, process_context_to_string
 from common.pipeline_base import PipelineBase
 from common.pipeline_factory import PipelineFactory
-import copy
+
 # ==========================
 # Load configuration per environment
 # ==========================
@@ -117,11 +117,11 @@ class NSEHistoricalDataPipeline(PipelineBase):
           
             df = normalize_column_names(df)
             df = self.enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=RAW_SCHEMA_STRICT, stage="raw_input")
-
+            return df
         except Exception as e:
             self.logger.error(f"Error reading historical files: {e}")
-            raise
-        return df
+            raise e
+       
 
     def transform(self, df, ctx):
         try:
@@ -141,16 +141,17 @@ class NSEHistoricalDataPipeline(PipelineBase):
         return df
 
     def load(self, df):
-        record_count = df.count()
-        self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
+       
+        
 
         try:
             df.writeTo(self.table_name).overwrite(sf.expr("true"))
+            record_count = df.count()
+            self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
             self.logger.info(f"Successfully wrote {record_count:,} records")
            
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
-            print(e)
             raise
 
     def run(self):
@@ -316,8 +317,7 @@ if __name__ == "__main__":
 
         logger.info(f"Starting historical data load [{ENV}] at {datetime.now(timezone.utc)}")
 
-        print(copy.deepcopy(CONFIG))
-        pipeline = PipelineFactory.get_pipeline("nse_historical", spark, logger, copy.deepcopy(CONFIG))
+        pipeline = PipelineFactory.get_pipeline("nse_historical", spark, logger, CONFIG)
         pipeline.run()
 
         logger.info(f"Ending historical data load [{ENV}] at {datetime.now(timezone.utc)}")
