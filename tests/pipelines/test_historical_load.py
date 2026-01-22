@@ -1,9 +1,9 @@
 from pyspark.sql import Row
 from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA
 from ingestion.common.processing_metadata import create_process_context
-from platform.logging.logging import QDPLogger
-from platform.spark_dataframe.transforms import normalize_column_names
-
+from core.logging.logging import QDPLogger
+from core.spark_dataframe.transforms import normalize_column_names
+from core.spark_dataframe.schema import enforce_schema
 import yaml
 import gzip
 import shutil
@@ -70,7 +70,7 @@ def test_enforce_schema_adds_missing_columns_as_null(spark, pipeline):
     ]
     df = spark.createDataFrame(input_data)
 
-    result_df, _ = pipeline.enforce_schema(
+    result_df, _ = enforce_schema(
         df,
         RAW_INPUT_SCHEMA,
         logger=pipeline.logger,

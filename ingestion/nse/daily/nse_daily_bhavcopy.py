@@ -7,17 +7,18 @@ from datetime import datetime, timedelta, timezone
 import gzip
 import time
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from platform.pipeline.base import PipelineBase
-from platform.pipeline.factory import PipelineFactory
-from platform.config.loader import load_config
-from platform.logging.logging import QDPLogger
+from core.pipeline.base import PipelineBase
+from core.pipeline.factory import PipelineFactory
+from core.config.loader import load_config
+from core.logging.logging import QDPLogger
 from pyspark.sql import functions as sf
 from pyspark.sql.types import StringType, StructField, StructType, DateType, DoubleType, LongType
-from platform.spark_dataframe.transforms import normalize_column_names, standardize_date, cast_and_rename_columns
+from core.spark_dataframe.transforms import normalize_column_names, standardize_date, cast_and_rename_columns
 import copy
 import random
-from platform.quality.checks import DataQualityChecks
-from platform.spark_dataframe.actions import safe_count
+from core.quality.checks import DataQualityChecks
+from core.spark_dataframe.actions import safe_count
+from core.spark_dataframe.schema import enforce_schema
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -99,7 +100,7 @@ class NSEDailyData(PipelineBase):
         df = self.spark.read.options(header=True).csv(self.config["input_pattern"])
 
         df = normalize_column_names(df)
-        df, missing_cols_added = self.enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
+        df, missing_cols_added = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
 
 
         dq = DataQualityChecks(logger=self.logger)
@@ -132,7 +133,7 @@ class NSEDailyData(PipelineBase):
                 df = df.withColumn(col, sf.lit(val))
 
             df = cast_and_rename_columns(df, self.config["casts"])
-            df, _ = self.enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
+            df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
             self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
             return df
         except Exception as e:
@@ -171,58 +172,6 @@ class NSEDailyData(PipelineBase):
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
-    
-    def enforce_schema(self, df, schema, logger=None, strict=True, stage="unknown"):
-        """
-        Enforces a schema contract.
-
-        strict=True:
-        - missing columns -> error
-        - extra columns -> error
-
-        strict=False:
-        - missing columns -> add as null
-        - extra columns -> drop
-        """
-
-        expected_cols = {field.name for field in schema}
-        actual_cols = set(df.columns)
-        extra_cols = actual_cols - expected_cols
-        missing_cols = expected_cols - actual_cols
-
-        missing_cols_added = []
-
-        if strict:
-            errors = []
-            if missing_cols:
-                errors.append(f"[{stage}] Missing columns: {sorted(missing_cols)}")
-            if extra_cols:
-                errors.append(f"[{stage}] Extra columns: {sorted(extra_cols)}")
-            if errors:
-                msg = f"[{stage}] Schema validation failed: " + "; ".join(errors)
-                if logger:
-                    logger.error(msg)
-                raise ValueError(msg)
-
-            # Column order enforcement
-            return df.select([f.name for f in schema]), missing_cols_added
-        # ---------------------------
-        # STRICT MODE: FALSE
-        # ---------------------------
-
-        for field in missing_cols:
-            missing_cols_added.append(field)
-            df = df.withColumn(field, sf.lit(None).cast(schema[field].dataType))
-            if logger:
-                logger.warning(f"[{stage}] Missing column added as null: {field}")
-        
-        if extra_cols:
-            if logger:
-                logger.warning(f"[{stage}] Extra columns dropped: {sorted(extra_cols)}")
-            df = df.drop(*extra_cols)
-        
-        return df.select([f.name for f in schema]), missing_cols_added
-
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

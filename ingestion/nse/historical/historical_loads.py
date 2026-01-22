@@ -14,15 +14,15 @@ from datetime import datetime, timedelta, timezone
 from pyspark.sql import functions as sf
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from platform.logging.logging import QDPLogger
+from core.logging.logging import QDPLogger
 from ingestion.common.processing_metadata import create_process_context, process_context_to_string
-from platform.pipeline.base import PipelineBase
-from platform.pipeline.factory import PipelineFactory
-from platform.quality.checks import DataQualityChecks
-from platform.config.loader import load_config
-from platform.spark_dataframe.transforms import normalize_column_names
-from platform.spark_dataframe.actions import safe_count
-
+from core.pipeline.base import PipelineBase
+from core.pipeline.factory import PipelineFactory
+from core.quality.checks import DataQualityChecks
+from core.config.loader import load_config
+from core.spark_dataframe.transforms import normalize_column_names
+from core.spark_dataframe.actions import safe_count
+from core.spark_dataframe.schema import enforce_schema
     
 # ==========================
 # Schemas and DDLs
@@ -120,7 +120,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
             self.logger.debug(f"Input schema: {df.schema.simpleString()}")
           
             df = normalize_column_names(df)
-            df, missing_cols_added = self.enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
+            df, missing_cols_added = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
             # --------------------------
             # Data Quality Checks
             # --------------------------
@@ -143,7 +143,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
             
             df = self._add_metadata(df, ctx)
 
-            df, _ = self.enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
+            df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
 
            
             self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
@@ -230,56 +230,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
         return df
     
-    def enforce_schema(self, df, schema, logger=None, strict=True, stage="unknown"):
-        """
-        Enforces a schema contract.
-
-        strict=True:
-        - missing columns -> error
-        - extra columns -> error
-
-        strict=False:
-        - missing columns -> add as null
-        - extra columns -> drop
-        """
-
-        expected_cols = {field.name for field in schema}
-        actual_cols = set(df.columns)
-        extra_cols = actual_cols - expected_cols
-        missing_cols = expected_cols - actual_cols
-
-        missing_cols_added = []
-
-        if strict:
-            errors = []
-            if missing_cols:
-                errors.append(f"[{stage}] Missing columns: {sorted(missing_cols)}")
-            if extra_cols:
-                errors.append(f"[{stage}] Extra columns: {sorted(extra_cols)}")
-            if errors:
-                msg = f"[{stage}] Schema validation failed: " + "; ".join(errors)
-                if logger:
-                    logger.error(msg)
-                raise ValueError(msg)
-
-            # Column order enforcement
-            return df.select([f.name for f in schema]), missing_cols_added
-        # ---------------------------
-        # STRICT MODE: FALSE
-        # ---------------------------
-
-        for field in missing_cols:
-            missing_cols_added.append(field)
-            df = df.withColumn(field, sf.lit(None).cast(schema[field].dataType))
-            if logger:
-                logger.warning(f"[{stage}] Missing column added as null: {field}")
-        
-        if extra_cols:
-            if logger:
-                logger.warning(f"[{stage}] Extra columns dropped: {sorted(extra_cols)}")
-            df = df.drop(*extra_cols)
-        
-        return df.select([f.name for f in schema]), missing_cols_added
+    
     
     def _post_etl_cleanup(self, ctx):
         try:

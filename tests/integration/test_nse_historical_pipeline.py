@@ -1,7 +1,7 @@
 # tests/integration/test_nse_historical_pipeline.py
 import os
 from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline
-from common.logging.logging import QDPLogger
+from core.logging.logging import QDPLogger
 
 
 def test_pipeline_end_to_end(spark, tmp_path):

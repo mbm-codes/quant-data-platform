@@ -1,4 +1,4 @@
-from platform.pipeline.base import PipelineBase
+from core.pipeline.base import PipelineBase
 
 class PipelineFactory:
     """
