@@ -1,5 +1,5 @@
 from pyspark.sql import functions as sf
-from pyspark.sql.types import MapType, StringType,IntegerType,DoubleType,DecimalType,LongType,BooleanType,FloatType,DateType,TimestampType, DataType, _parse_datatype_string
+from pyspark.sql.types import MapType, StringType,IntegerType,DoubleType,DecimalType,LongType,BooleanType,FloatType,DateType,TimestampType, DataType, _parse_datatype_string, StructType, ArrayType
 
 def normalize_column_names(df):
     return df.select([sf.col(c).alias(c.strip().lower().replace(" ", "_")) for c in df.columns])
@@ -13,13 +13,6 @@ def standardize_date(df, col_names, src_format):
         )
 
     return df
-
-
-import pyspark.sql.functions as sf
-from pyspark.sql.types import (
-    _parse_datatype_string, DecimalType,
-    ArrayType, MapType, StructType, StringType
-)
 
 def cast_and_rename_columns(df, cast_rename_config: dict):
     """
@@ -70,19 +63,3 @@ def cast_and_rename_columns(df, cast_rename_config: dict):
         df = _replace_or_rename(df, src_col, dst_col, expr)
 
     return df
-
-
-            # if src_col in df.columns:
-            #     if dtype.lower().startswith("map") or dtype.lower().startswith("struct") or dtype.lower().startswith("array"):
-            #         #if dtype.lower().startswith("map"):
-            #         if src_col == dst_col:
-            #             df = df.withColumn(dst_col, sf.from_json(src_col, dtype.lower()))   # type: ignore[arg-type]
-            #         else:
-            #             df = df.withColumn(dst_col, sf.col(src_col)).drop(src_col)
-            #     else:   
-            #         if src_col == dst_col:
-            #             df = df.withColumn(dst_col, sf.col(src_col).cast(dtype))
-            #         else:
-            #             df = df.withColumn(dst_col, sf.col(src_col).cast(dtype)).drop(src_col)
-    return df
- 

@@ -11,11 +11,11 @@ import os
 import yaml
 import copy
 from datetime import datetime, timedelta, timezone
-from pyspark.sql import functions as sf
+from pyspark.sql import functions as sf, DataFrame
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
 from core.logging.logging import QDPLogger
-from ingestion.common.processing_metadata import create_process_context, process_context_to_string
+from core.metadata.processing_metadata import create_process_context, process_context_to_string
 from core.pipeline.base import PipelineBase
 from core.pipeline.factory import PipelineFactory
 from core.quality.checks import DataQualityChecks
@@ -135,9 +135,15 @@ class NSEHistoricalDataPipeline(PipelineBase):
             raise ValueError("Extraction failed") from e
        
 
-    def transform(self, df, ctx):
+    def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
             self.logger.info("Starting transformations on historical data")
+            if isinstance(df_or_dfs, DataFrame):
+                df = df_or_dfs
+            elif isinstance(df_or_dfs, dict):
+                df = next(iter(df_or_dfs.values()))
+            else:
+                raise ValueError("df_or_dfs must be a DataFrame or dict")
 
             df = self._derive_business_fields(df)
             
@@ -167,6 +173,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
+    
+
 
     def run(self):
         ctx = create_process_context(

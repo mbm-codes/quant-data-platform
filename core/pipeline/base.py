@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from pyspark.sql import DataFrame
+from typing import Union
 
 class PipelineBase(ABC):
     """
@@ -12,12 +14,12 @@ class PipelineBase(ABC):
         self.config = config
 
     @abstractmethod
-    def extract(self):
+    def extract(self) -> Union[DataFrame, dict]:
         """Extract data from source"""
         pass
 
     @abstractmethod
-    def transform(self, df, ctx):
+    def transform(self, df_or_dfs: Union[DataFrame, dict], ctx) -> DataFrame:
         """Transform the extracted data"""
         pass
 
@@ -33,8 +35,8 @@ class PipelineBase(ABC):
         try:
             self.pre_etl(ctx)
 
-            df = self.extract()
-            df = self.transform(df, ctx)
+            df_or_dfs = self.extract()
+            df = self.transform(df_or_dfs, ctx)
             self.load(df)
 
             self.post_etl(ctx)
@@ -58,7 +60,7 @@ class PipelineBase(ABC):
         
 
     def create_process_context(self):
-        from ingestion.common.processing_metadata import create_process_context, process_context_to_string
+        from core.metadata.processing_metadata import create_process_context, process_context_to_string
         ctx = create_process_context(
             pipeline_version=self.config["pipeline_version"],
             is_backfill=False,

@@ -11,7 +11,7 @@ from core.pipeline.base import PipelineBase
 from core.pipeline.factory import PipelineFactory
 from core.config.loader import load_config
 from core.logging.logging import QDPLogger
-from pyspark.sql import functions as sf
+from pyspark.sql import functions as sf, DataFrame
 from pyspark.sql.types import StringType, StructField, StructType, DateType, DoubleType, LongType
 from core.spark_dataframe.transforms import normalize_column_names, standardize_date, cast_and_rename_columns
 import copy
@@ -89,8 +89,7 @@ class NSEDailyData(PipelineBase):
         date_list = get_dates()
         try:
             for dt in date_list:
-                print(base_url+dt+".csv")
-                #fetch_data(base_url+dt+".csv", output_path, self.logger)
+                fetch_data(base_url+dt+".csv", output_path, self.logger)
         except Exception as e:
             self.logger.error(f"Error encountered : {str(e)}")
             raise
@@ -109,7 +108,6 @@ class NSEDailyData(PipelineBase):
         self.logger.info(f"Data quality metrics: {dq.metrics} ")
 
         df = normalize_column_names(df)
-        print(df.count())
         self.logger.info(f"Input schema: {df.schema.simpleString()}")
 
         return df
@@ -123,8 +121,15 @@ class NSEDailyData(PipelineBase):
     def post_etl(self, ctx):
         self.logger.info("Running post-etl steps for NSE Historical Data Pipeline")
     
-    def transform(self, df, ctx):
+    def transform(self, df_or_dfs, ctx):
         try:
+            if isinstance(df_or_dfs, DataFrame):
+                df = df_or_dfs
+            elif isinstance(df_or_dfs, dict):
+                df = next(iter(df_or_dfs.values()))
+            else:
+                raise ValueError("df_or_dfs must be a DataFrame or dict")
+
             df = standardize_date(df, ["date1"], "dd-MMM-yyyy")
             df = self._add_metadata(df, ctx)
             
