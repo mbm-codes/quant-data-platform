@@ -60,7 +60,7 @@ class PipelineBase(ABC):
         
 
     def create_process_context(self):
-        from core.metadata.processing_metadata import create_process_context, process_context_to_string
+        from core.context.process_context import create_process_context, process_context_to_string
         ctx = create_process_context(
             pipeline_version=self.config["pipeline_version"],
             is_backfill=False,
