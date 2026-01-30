@@ -33,6 +33,10 @@ class SilverPipelineBase(PipelineBase):
         pass
 
     @abstractmethod
+    def read_silver(self) -> Union[DataFrame, dict]:
+        pass
+
+    @abstractmethod
     def apply_business_rules(self, df: DataFrame) -> DataFrame:
         pass
 

@@ -10,61 +10,63 @@ from lakehouse.iceberg.spark_session import SparkSessionBuilder
 from datetime import datetime, timezone
 import os
 import copy
+from pyspark.sql.window import Window
+from functools import reduce
 
 
-class NSEHistoricalSilver(SilverPipelineBase):
+class NSEEquityDataSilver(SilverPipelineBase):
     def __init__(self, spark, logger, config):
         self.spark = spark
         self.logger = logger
         self.config = config
         self.input_table_names = config["input_tables"]
-        #self.raw_schema_strict = config["schema"]["raw"]["strict"]
-        #self.output_schema_strict = config["schema"]["output"]["strict"]
         self.output_table_name = config["output_table"]
 
     def pre_etl(self, ctx):
-        self.logger.info("Running pre-etl steps for NSE Historical Data Pipeline")
+        self.logger.info("Running pre-etl steps for NSE Equity Silver Data Pipeline")
   
     
     def post_etl(self, ctx):
-        self.logger.info("Running post-etl steps for NSE Historical Data Pipeline")
+        self.logger.info("Running post-etl steps for NSE Equity Silver Data Pipeline")
         
 
     def extract(self) -> Union[DataFrame, dict]:
         try:
         
-            self.logger.info(f"Reading {''.join(self.config['input_tables'].values())} bronze layer tables")
-            df_or_dfs = self.read_bronze()
+            self.logger.info(f"Reading {''.join(self.config['input_tables'].values())} silver layer tables")
+            df_or_dfs = self.read_silver()
             
             return df_or_dfs
 
         except Exception as e:
-            self.logger.error(f"Failed to read {''.join(self.config['input_tables'].values())} bronze layer tables")
+            self.logger.error(f"Failed to read {''.join(self.config['input_tables'].values())} silver layer tables")
             raise ValueError("Failed to read") from e
 
     def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
             self.logger.info(f"Starting transformations on {''.join(self.config['input_tables'].values())}")
-            if isinstance(df_or_dfs, DataFrame):
-                df = df_or_dfs
-            elif isinstance(df_or_dfs, dict):
-                df = next(iter(df_or_dfs.values()))
-            else:
-                raise ValueError("df_or_dfs must be a DataFrame or dict")
-            
+            input_df_dict = df_or_dfs
 
-            df = df.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year")
-            df = self.apply_business_rules(df)
-            df = self._add_metadata(df, ctx)
-        
-            self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-            return df
+            for tbl_name, tbl_df in input_df_dict.items():
+                input_df_dict = { k: v.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year") for k, v in input_df_dict.items() }
+
+            input_df_dict["slvr_nse_historical"] = input_df_dict["slvr_nse_historical"].withColumnRenamed("volume_qty", "ttl_trd_qnty")
+            
+            input_df_dict["slvr_nse_historical"] = input_df_dict["slvr_nse_historical"].withColumn("symbol", sf.regexp_replace("symbol", r"\.NS$", "" ))
+
+            merged_nse_historic_daily_df = reduce(lambda d1, d2: d1.unionByName(d2, allowMissingColumns=True), input_df_dict.values())
+            merged_nse_historic_daily_df = self.apply_business_rules(merged_nse_historic_daily_df)
+            merged_nse_historic_daily_df = self._add_metadata(merged_nse_historic_daily_df, ctx)
+            self.logger.debug(f"Transformed schema: {merged_nse_historic_daily_df.schema.simpleString()}")
+            
+            return merged_nse_historic_daily_df
         except Exception as e:
-            self.logger.error(f"Error transforming NSE Bhavcopy bronze layer -> silver layer: {e}")
+            self.logger.error(f"Error transforming NSE Equity silver layer: {e}")
             raise
     
     
     def load(self, df):
+
         record_count = safe_count(df, logger=self.logger)
         self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.output_table_name}")
 
@@ -79,25 +81,22 @@ class NSEHistoricalSilver(SilverPipelineBase):
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
     
-    def read_bronze(self) -> Union[DataFrame, dict]:
+    def read_silver(self) -> Union[DataFrame, dict]:
         df_map = {}
         for tbl_typ, tbl_name in self.config["input_tables"].items():
-            df_map[tbl_typ] = self.spark.read.table(tbl_name)
-            
+            if tbl_typ == "slvr_nse_bhavcopy_daily":
+                df_map[tbl_typ] = self.spark.read.table(tbl_name).filter("series = 'EQ'").drop("series")
+            else:
+                df_map[tbl_typ] = self.spark.read.table(tbl_name)
 
-        if len(df_map) == 1:
-            return next(iter(df_map.values()))
         return df_map
     
     def apply_business_rules(self, df: DataFrame) -> DataFrame:
-        # Business rules - 
-        # 1 filter out data on or after 2023-10-30
-        # 2 do a dedup on entire dataset
-        df_filtered = df.filter(sf.col("trade_date") < "2023-10-30")
-        self.logger.info(f"Record count after filtering data out on or after 2023-10-30, {safe_count(df)}")
-        
-        df_clean = df_filtered.dropDuplicates()
-        self.logger.info(f"Record count after deduping, {safe_count(df)}")
+
+        self.logger.info(f"Record count before deduping, {safe_count(df)}")
+
+        df_clean = df.dropDuplicates(["symbol", "trade_date"])
+        self.logger.info(f"Record count after deduping, {safe_count(df_clean)}")
        
         return df_clean
 
@@ -112,10 +111,14 @@ class NSEHistoricalSilver(SilverPipelineBase):
             "pipeline_version": sf.lit(ctx.pipeline_version),
             "trade_year": sf.year("trade_date")
         }
-        for col, expr in meta_cols.items():
-            df = df.withColumn(col, expr)
+
+        df = reduce(lambda acc_df, col_expr: acc_df.withColumn(col_expr[0], col_expr[1]), meta_cols.items(), df)
+
 
         return df
+
+    def read_bronze(self) -> Union[DataFrame, dict]:
+        return super().read_bronze()
 
     
     def write_silver(self, df: DataFrame):
@@ -148,19 +151,19 @@ def main():
     # ==========================
 
     ENV = os.getenv("QDP_ENV", "local")
-    conf_file = f"./config/transformation/{ENV}_slvr_nse_historical.yaml"
+    conf_file = f"./config/transformation/{ENV}_slvr_nse_merge_historical_daily.yaml"
     CONFIG = load_config(ENV, conf_file)
 
 
     # Compute log paths early
-    app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_slvr_nse_historical_app.log"
-    spark_log_file = CONFIG.get("spark_log_file") or f"./logs/{ENV}_slvr_nse_historical_spark.log"
+    app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_slvr_nse_merge_historical_daily_app.log"
+    spark_log_file = CONFIG.get("spark_log_file") or f"./logs/{ENV}_slvr_nse_merge_historical_daily_spark.log"
 
         # ==========================
     # Initialize logger
     # ==========================
     logger = QDPLogger(
-        name=f"{ENV}_slvr_nse_historical",
+        name=f"{ENV}_slvr_nse_merge_historical_daily",
         app_log_file=app_log_file,
         spark_log_file=spark_log_file,
         level=QDPLogger.INFO
@@ -176,7 +179,7 @@ def main():
         catalog_name = CONFIG.get("catalog_name", "local")
 
         spark = SparkSessionBuilder(
-            app_name=f"qdp-{ENV}-slvr-nse-historical",
+            app_name=f"qdp-{ENV}-slvr-nse-merge-historical-daily",
             environment=ENV,
             warehouse_path=warehouse_path,
             catalog_name=catalog_name
@@ -184,17 +187,17 @@ def main():
 
         logger.attach_spark_logs(spark)
         start_ts = datetime.now(timezone.utc)
-        logger.info(f"Starting Silver NSE Historical transformation in [{ENV}] at {start_ts}")
+        logger.info(f"Starting Silver NSE Equity Silver transformation in [{ENV}] at {start_ts}")
 
         # ==========================
         # Create pipeline and run
         # ==========================
-        pipeline = TransformationPipelineFactory.get_pipeline("nse_historical_silver", spark, logger, copy.deepcopy(CONFIG))
+        pipeline = TransformationPipelineFactory.get_pipeline("nse_equity_silver", spark, logger, copy.deepcopy(CONFIG))
         pipeline.run()
 
         end_ts = datetime.now(timezone.utc)
         duration = (end_ts - start_ts).total_seconds()
-        logger.info(f"Ending transformation of NSE Historical transformation in [{ENV}] at {end_ts.isoformat()} | (Duration: {duration}s)")
+        logger.info(f"Ending transformation of NSE Bhavcopy Daily transformation in [{ENV}] at {end_ts.isoformat()} | (Duration: {duration}s)")
     
     except Exception as e:
         logger.error(f"Transformation execution failed: {e}")

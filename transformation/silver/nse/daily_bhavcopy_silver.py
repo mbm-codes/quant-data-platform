@@ -3,7 +3,7 @@ from core.pipeline.transformation_factory import TransformationPipelineFactory
 from pyspark.sql import DataFrame, functions as sf
 from typing import Union
 from core.spark_dataframe.actions import safe_count
-from core.metadata.processing_metadata import create_process_context, process_context_to_string
+from core.context.process_context import create_process_context, process_context_to_string
 from core.config.loader import load_config
 from core.logging.logging import QDPLogger
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
@@ -93,13 +93,12 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
     
     def apply_business_rules(self, df: DataFrame) -> DataFrame:
         # Business rules - 
-        # 1 filter 
+        # 1 filter >= 2023-10-30
         # 2 do a dedup on entire dataset
-        self.logger.info(f"Record count before deduping, {safe_count(df)}")
-        #rej_records = df.
-        
 
-        df_clean = df.dropDuplicates()
+        self.logger.info(f"Record count before deduping, {safe_count(df)}")
+
+        df_clean = df.filter(sf.col("trade_date") >= "2023-10-30").dropDuplicates()
         self.logger.info(f"Record count after deduping, {safe_count(df_clean)}")
        
         return df_clean
@@ -126,6 +125,9 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
     
     def run_quality_checks(self, df: DataFrame, ctx):
         return super().run_quality_checks(df, ctx)
+    
+    def read_silver(self) -> Union[DataFrame, dict]:
+        return super().read_silver()
 
     def run(self):
         ctx = create_process_context(

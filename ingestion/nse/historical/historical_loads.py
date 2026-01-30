@@ -15,7 +15,7 @@ from pyspark.sql import functions as sf, DataFrame
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
 from core.logging.logging import QDPLogger
-from core.metadata.processing_metadata import create_process_context, process_context_to_string
+from core.context.process_context import create_process_context, process_context_to_string
 from core.pipeline.base import PipelineBase
 from core.pipeline.factory import PipelineFactory
 from core.quality.checks import DataQualityChecks

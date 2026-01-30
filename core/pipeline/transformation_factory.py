@@ -7,7 +7,8 @@ class TransformationPipelineFactory:
 
     _pipeline_registry = {
         "nse_daily_bhavcopy_silver": "transformation.silver.nse.daily_bhavcopy_silver:NSEDailyBhavcopySilver",
-        "nse_historical_silver": "transformation.silver.nse.historical_silver:NSEHistoricalSilver"
+        "nse_historical_silver": "transformation.silver.nse.historical_silver:NSEHistoricalSilver",
+        "nse_equity_silver": "transformation.silver.nse.merge_historical_daily:NSEEquityDataSilver"
     }
 
     @staticmethod
