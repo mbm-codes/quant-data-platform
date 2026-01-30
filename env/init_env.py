@@ -75,7 +75,10 @@ def run_sql_spark(file_path):
 
 
 run_sql_spark("env/databases.sql")
+run_sql_spark("env/tables/control.sql")
 run_sql_spark("env/tables/bronze.sql")
+run_sql_spark("env/tables/silver.sql")
+run_sql_spark("env/tables/gold.sql")
 
 spark.sql("select count(1) from local.market_lakehouse.bronze_nse_historical_prices_raw").show()
 

@@ -1,6 +1,6 @@
 from pyspark.sql import Row
 from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA
-from core.metadata.processing_metadata import create_process_context
+from core.context.process_context import create_process_context
 from core.logging.logging import QDPLogger
 from core.spark_dataframe.transforms import normalize_column_names
 from core.spark_dataframe.schema import enforce_schema

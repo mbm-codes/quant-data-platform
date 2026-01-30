@@ -1,4 +1,4 @@
-drop table local.market_lakehouse.bronze_nse_historical_prices_raw;
+
 
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw (
     symbol STRING,
@@ -25,10 +25,7 @@ CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_historical_prices_r
 PARTITIONED BY (trade_year);
 
 
-
-drop table test.market_lakehouse.intgr_bronze_nse_historical_prices_raw;
-
-CREATE TABLE IF NOT EXISTS test.market_lakehouse.intgr_bronze_nse_historical_prices_raw (
+CREATE TABLE IF NOT EXISTS local.market_lakehouse.intgr_bronze_nse_historical_prices_raw (
     symbol STRING,
     trade_date DATE,
     open_price DOUBLE,
@@ -53,7 +50,7 @@ CREATE TABLE IF NOT EXISTS test.market_lakehouse.intgr_bronze_nse_historical_pri
 PARTITIONED BY (trade_year);
 
 
-drop table local.market_lakehouse.bronze_nse_daily_bhavcopy_raw;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_daily_bhavcopy_raw (
     symbol           STRING,
     series           STRING,
