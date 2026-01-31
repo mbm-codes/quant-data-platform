@@ -12,3 +12,5 @@ input_tables:
 
 output_table: "local.market_lakehouse.slvr_nse_bhavcopy_daily_from_30_oct_2023"
 
+load_type: "full"
+

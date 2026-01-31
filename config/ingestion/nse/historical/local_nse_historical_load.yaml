@@ -2,7 +2,7 @@
 
 pipeline_version: "v1.0"
 process_name: "nse_historical_load"
-run_id: "1"
+#run_id: "1"
 process_id: "job_nse_historical_load"
 
 # Input files (local path)
@@ -42,3 +42,5 @@ data_quality_checks:
 # Logging paths
 app_log_file: "./logs/local_job_nse_historical_load_app.log"
 spark_log_file: "./logs/local_job_nse_historical_load_spark.log"
+
+load_type: "full"

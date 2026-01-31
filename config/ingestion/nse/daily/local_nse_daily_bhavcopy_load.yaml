@@ -48,3 +48,5 @@ data_quality_checks:
 static_columns:
   exchange: NSE
   data_src: nse_bhavcopy
+
+load_type: "full"

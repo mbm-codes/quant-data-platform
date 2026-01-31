@@ -12,3 +12,5 @@ input_tables:
 
 output_table: "local.market_lakehouse.slvr_nse_historical_prices_till_29_oct_2023"
 
+load_type: "full"
+
