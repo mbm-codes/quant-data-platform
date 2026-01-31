@@ -1,0 +1,52 @@
+
+pipeline_version: "v1.0"
+process_name: "nse_daily_bhavcopy_load"
+run_id: "1"
+process_id: "job_nse_daily_bhavcopy_load"
+
+# Logging paths
+app_log_file: "./logs/local_job_nse_daily_bhavcopy_load_app.log"
+spark_log_file: "./logs/local_job_nse_daily_bhavcopy_load_spark.log"
+
+# Input files (local path)
+input_pattern: "/Users/mihirmehta/Desktop/Study/projects/quant-data-platform/data_sources/nse/nse_bhavcopy_from_nov_2023/*.csv.gz"
+
+# Output Iceberg table
+output_table: "local.market_lakehouse.bronze_nse_daily_bhavcopy_raw"
+
+# Column type casting
+casts:
+  date1: ["trade_date", "date"]
+  prev_close: ["prev_close", "double"]
+  open_price: ["open_price", "double"]
+  high_price: ["high_price", "double"]
+  low_price: ["low_price", "double"]
+  last_price: ["last_price", "double"]
+  close_price: ["close_price", "double"]
+  avg_price: ["avg_price", "double"]
+  ttl_trd_qnty: ["ttl_trd_qnty", "bigint"]
+  turnover_lacs: ["turnover_lacs", "double"]
+  no_of_trades: ["no_of_trades", "bigint"]
+  deliv_qty: ["deliv_qty", "bigint"]
+  deliv_per: ["deliv_per", "double"]
+
+schema:
+  raw:
+    strict: true
+  output:
+    strict: true
+
+data_quality_checks:
+  raw_input:
+    no_nulls_except: []
+    positive_values: ["prev_close", "open_price", "high_price", "low_price", "last_price", "close_price", "avg_price", "ttl_trd_qnty", "turnover_lacs", "no_of_trades", deliv_qty, deliv_per]
+  output:
+    no_nulls_except: []
+    positive_values: ["prev_close", "open_price", "high_price", "low_price", "last_price", "close_price", "avg_price", "ttl_trd_qnty", "turnover_lacs", "no_of_trades", deliv_qty, deliv_per]
+
+# Static columns added to all rows
+static_columns:
+  exchange: NSE
+  data_src: nse_bhavcopy
+
+load_type: "full"

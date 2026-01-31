@@ -1,0 +1,19 @@
+pipeline_version: "v1.0"
+process_name: "slvr_nse_equity_data"
+run_id: "1"
+process_id: "job_slvr_nse_equity_data"
+
+# Logging paths
+app_log_file: "./logs/local_job_slvr_nse_equity_data_app.log"
+spark_log_file: "./logs/local_job_slvr_nse_equity_data_spark.log"
+
+input_tables:
+  slvr_nse_bhavcopy_daily: "local.market_lakehouse.slvr_nse_bhavcopy_daily_from_30_oct_2023"
+  slvr_nse_historical: "local.market_lakehouse.slvr_nse_historical_prices_till_29_oct_2023"
+
+output_table: "local.market_lakehouse.slvr_nse_equity_data"
+
+load_type: "full"
+
+
+

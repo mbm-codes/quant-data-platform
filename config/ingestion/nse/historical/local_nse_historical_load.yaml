@@ -2,7 +2,7 @@
 
 pipeline_version: "v1.0"
 process_name: "nse_historical_load"
-run_id: "1"
+#run_id: "1"
 process_id: "job_nse_historical_load"
 
 # Input files (local path)
@@ -30,9 +30,17 @@ schema:
   output:
     strict: true
 
-
+data_quality_checks:
+  raw_input:
+    no_nulls_except: []
+    positive_values: ["open", "close", "high", "low", "volume"]
+  output:
+    no_nulls_except: []
+    positive_values: ["open_price", "close_price", "high_price", "low_price", "volume_qty"]
 
 
 # Logging paths
 app_log_file: "./logs/local_job_nse_historical_load_app.log"
 spark_log_file: "./logs/local_job_nse_historical_load_spark.log"
+
+load_type: "full"

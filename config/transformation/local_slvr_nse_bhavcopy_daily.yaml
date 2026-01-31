@@ -1,0 +1,16 @@
+pipeline_version: "v1.0"
+process_name: "slvr_nse_bhavcopy_daily"
+run_id: "1"
+process_id: "job_slvr_nse_bhavcopy_daily"
+
+# Logging paths
+app_log_file: "./logs/local_job_slvr_nse_bhavcopy_daily.log"
+spark_log_file: "./logs/local_job_slvr_nse_bhavcopy_daily_app_spark.log"
+
+input_tables:
+  brnz_nse_bhavcopy_daily: "local.market_lakehouse.bronze_nse_daily_bhavcopy_raw"
+
+output_table: "local.market_lakehouse.slvr_nse_bhavcopy_daily_from_30_oct_2023"
+
+load_type: "full"
+

@@ -1,8 +1,9 @@
 from pyspark.sql import Row
-from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA
-from ingestion.common.processing_metadata import create_process_context
-from common.logging.logging import QDPLogger
-
+from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA 
+from core.context.process_context import create_process_context
+from core.logging.logging import QDPLogger
+from core.spark_dataframe.transforms import normalize_column_names
+from core.spark_dataframe.schema import enforce_schema
 import yaml
 import gzip
 import shutil
@@ -29,8 +30,8 @@ def test_transform_renames_and_casts(pipeline, spark):
         Row(date="2022-01-02", open="106.0", high="112.0", low="104.0", close="108.0", volume="1500", dividends="0.0", stock_splits="0"),
     ]
     input_df = spark.createDataFrame(input_data)
-
-    ctx = create_process_context(
+    ctx = pipeline.create_execution_context()
+    proc_ctx = create_process_context(
         pipeline_version="v1.0",
         is_backfill=False,
         process_id="test",
@@ -40,6 +41,7 @@ def test_transform_renames_and_casts(pipeline, spark):
         force_new_run_id=False,
         orchestrator_context=None
     )
+    ctx.process = proc_ctx
 
     transformed_df = pipeline.transform(input_df, ctx)
     result = transformed_df.collect()
@@ -63,31 +65,25 @@ def test_transform_renames_and_casts(pipeline, spark):
     assert result[0]["close_price"] == 105.0
     assert result[0]["volume_qty"] == 1000
 
-def test_transform_missing_column_creates_null(pipeline, spark):
-    
-
+def test_enforce_schema_adds_missing_columns_as_null(spark, pipeline):
     input_data = [
         Row(date="2022-01-01"),
     ]
-    input_df = spark.createDataFrame(input_data)
-    input_df = pipeline.enforce_schema(input_df, RAW_INPUT_SCHEMA, logger=pipeline.logger, strict=False, stage="raw_input")
+    df = spark.createDataFrame(input_data)
 
-    ctx = create_process_context(
-        pipeline_version="v1.0",
-        is_backfill=False,
-        process_id="test",
-        run_id="1",
-        process_name="test",
-        spark=spark,
-        force_new_run_id=False,
-        orchestrator_context=None
+    result_df, _ = enforce_schema(
+        df,
+        RAW_INPUT_SCHEMA,
+        logger=pipeline.logger,
+        strict=False,
+        stage="raw_input"
     )
 
-    transformed_df = pipeline.transform(input_df, ctx)
-    result = transformed_df.first()
+    result = result_df.first()
 
-    assert result.open_price is None
-    assert result.close_price is None
+    assert result.open is None
+    assert result.close is None
+    assert result.volume is None
 
 def test_metadata_columns_added(pipeline, spark):
     
@@ -97,7 +93,7 @@ def test_metadata_columns_added(pipeline, spark):
     ]
     input_df = spark.createDataFrame(input_data)
 
-    ctx = create_process_context(
+    proc_ctx = create_process_context(
         pipeline_version="v1.0",
         is_backfill=False,
         process_id="test_process",
@@ -108,6 +104,8 @@ def test_metadata_columns_added(pipeline, spark):
         orchestrator_context=None
     )
 
+    ctx = pipeline.create_execution_context()
+    ctx.process = proc_ctx
     transformed_df = pipeline.transform(input_df, ctx)
     result = transformed_df.collect()
 
@@ -133,6 +131,18 @@ def test_extract_raises_on_schema_mismatch(pipeline, tmp_path):
         df = pipeline.extract()
     
     msg = str(excinfo.value)
-    assert "Schema validation failed" in msg
-    assert "Missing columns" in msg
-    assert "Extra columns" in msg
+    assert "Extraction failed" in msg
+
+def test_normalize_column_names(pipeline, spark):
+    input_data = [
+        {
+            "Trade Date": "2022-01-01",
+            "Open Price": "100.5",
+            "HIGH_PRICE": "110.0", 
+            
+        }
+    ]
+    input_df = spark.createDataFrame(input_data)
+    normalized_df = normalize_column_names(input_df)
+    expected_columns = {"trade_date", "open_price", "high_price"}
+    assert sorted(set(normalized_df.columns)) == sorted(expected_columns)

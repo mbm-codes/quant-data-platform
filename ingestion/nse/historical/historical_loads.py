@@ -1,19 +1,34 @@
+# This module implements the NSE Historical Data Pipeline
+# It reads historical stock price data from CSV files,
+# transforms it, enforces schema contracts, performs data quality checks,
+# and loads it into an Iceberg table in a data lakehouse.
+# The pipeline is configurable per environment (local, dev, prod).
+# Key features include schema enforcement with strict and non-strict modes,
+# metadata enrichment, and post-load cleanup of Iceberg snapshots and orphan files.
+# Note - The source data is entire NSE historical data until 2023-10-31  
+
 import os
 import yaml
+import argparse
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pyspark.sql import functions as sf
+from typing import Optional
+from pyspark.sql import functions as sf, DataFrame
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
 from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from common.logging.logging import QDPLogger
-from ingestion.common.processing_metadata import create_process_context, process_context_to_string
-from common.pipeline_base import PipelineBase
-from common.pipeline_factory import PipelineFactory
-
+from core.logging.logging import QDPLogger
+from core.context.process_context import process_context_to_string
+from core.pipeline.base import PipelineBase
+from core.pipeline.factory import PipelineFactory
+from core.quality.checks import DataQualityChecks
+from core.config.loader import load_config
+from core.spark_dataframe.transforms import normalize_column_names, trim_and_nullify_strings
+from core.spark_dataframe.actions import safe_count
+from core.spark_dataframe.schema import enforce_schema
+    
 # ==========================
-# Load configuration per environment
+# Schemas and DDLs
 # ==========================
-ENV = os.getenv("QDP_ENV", "local")  # local/dev/prod
-CONFIG_FILE = f"./config/ingestion/nse/historical/{ENV}_nse_historical_load.yaml"
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -76,17 +91,6 @@ create_table_ddl = """
         PARTITIONED BY (trade_year);
     """
 
-with open(CONFIG_FILE, "r") as f:
-    CONFIG = yaml.safe_load(f)
-
-RAW_SCHEMA_STRICT = CONFIG["schema"]["raw"]["strict"]
-OUTPUT_SCHEMA_STRICT = CONFIG["schema"]["output"]["strict"]
-
-
-def normalize_column_names(df):
-    return df.select([sf.col(c).alias(c.lower().replace(" ", "_")) for c in df.columns])
-
-    
 # ==========================
 # Historical Data Pipeline
 # ==========================
@@ -96,14 +100,16 @@ class NSEHistoricalDataPipeline(PipelineBase):
         self.logger = logger
         self.config = config
         self.table_name = config["output_table"]
+        self.raw_schema_strict = config["schema"]["raw"]["strict"]
+        self.output_schema_strict = config["schema"]["output"]["strict"]
 
     # --------------------------
     # ETL Steps
     # --------------------------
     def pre_etl(self, ctx):
         self.logger.info("Running pre-etl steps for NSE Historical Data Pipeline")
-        #self.spark.sql("DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw")  
-        #self.spark.sql(create_table_ddl)
+        self.spark.sql("DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw")  
+        self.spark.sql(create_table_ddl)
     
     def post_etl(self, ctx):
         self.logger.info("Running post-etl steps for NSE Historical Data Pipeline")
@@ -116,61 +122,94 @@ class NSEHistoricalDataPipeline(PipelineBase):
             self.logger.debug(f"Input schema: {df.schema.simpleString()}")
           
             df = normalize_column_names(df)
-            df = self.enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=RAW_SCHEMA_STRICT, stage="raw_input")
+            df = trim_and_nullify_strings(df)
+            df, missing_cols_added = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
+            # --------------------------
+            # Data Quality Checks
+            # --------------------------
+            dq = DataQualityChecks(logger=self.logger)
+            dq.assert_no_nulls(df, [c for c in df.columns if c not in missing_cols_added ])
+            dq.assert_positive_values(df, self.config.get("data_quality_checks", {}).get("raw_input", {}).get("positive_values", []))
+            self.logger.info(f"Data quality metrics: {dq.metrics} ")
+
             return df
         except Exception as e:
-            self.logger.error(f"Error reading historical files: {e}")
-            raise e
+            self.logger.error(f"Failed to extract historical data: {e}")
+            raise ValueError("Extraction failed") from e
        
 
-    def transform(self, df, ctx):
+    def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
             self.logger.info("Starting transformations on historical data")
+            if isinstance(df_or_dfs, DataFrame):
+                df = df_or_dfs
+            elif isinstance(df_or_dfs, dict):
+                df = next(iter(df_or_dfs.values()))
+            else:
+                raise ValueError("df_or_dfs must be a DataFrame or dict")
 
             df = self._derive_business_fields(df)
             
             df = self._add_metadata(df, ctx)
 
-            df = self.enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=OUTPUT_SCHEMA_STRICT, stage="output")
+            df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
 
+           
             self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-
+            return df
         except Exception as e:
             self.logger.error(f"Error transforming historical data: {e}")
             raise
-        return df
-
-    def load(self, df):
-       
         
 
+    def load(self, df):
+        record_count = safe_count(df, logger=self.logger)
+        self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
+
+        if record_count is None or record_count == 0:
+            self.logger.warning("No records to write. Skipping load step.")
+            return
+        
         try:
             df.writeTo(self.table_name).overwrite(sf.expr("true"))
-            record_count = df.count()
-            self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
             self.logger.info(f"Successfully wrote {record_count:,} records")
-           
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
+    
+    def create_execution_context(self):
+        return super().create_execution_context()
 
     def run(self):
-        ctx = create_process_context(
-            pipeline_version=self.config["pipeline_version"],
-            is_backfill=False,
-            process_id=self.config["process_id"],
-            run_id=self.config["run_id"],
-            process_name=self.config["process_name"],
-            spark=self.spark,
-            force_new_run_id=False,
-            orchestrator_context=None
-        )
-        self.logger.info(f"Process Context: {process_context_to_string(ctx)}")
-        self.pre_etl(ctx)
-        df = self.extract()
-        df = self.transform(df, ctx)
-        self.load(df)
-        self.post_etl(ctx)
+    
+        ctx = self.create_execution_context()
+    
+        self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
+
+        load_type = self.config.get("load_type", "full")
+        try:
+            ctx.job_control.start_run(load_type=load_type)
+            self.logger.info(f"Job started with run_id: {ctx.process.run_id}")
+            self.pre_etl(ctx)
+            df = self.extract()
+            df = self.transform(df, ctx)
+            self.load(df)
+            self.post_etl(ctx)
+
+            # Mark success
+
+            max_ts = df.agg({"trade_date": "max"}).collect()[0][0] if isinstance(df, DataFrame) else None
+            rows_written = df.count() if isinstance(df, DataFrame) else None
+            ctx.job_control.mark_success(max_ts, rows_written)
+
+            self.logger.info(f"Pipeline completed successfully. Rows written: {rows_written} ")
+        except Exception as e:
+            # Mark failure
+
+            ctx.job_control.mark_failure(str(e))
+            self.logger.error(f"Pipeline failed: {e}")
+            raise
+        
 
     def _derive_business_fields(self, df):
         # Extract symbol from filename
@@ -200,70 +239,29 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
     def _add_metadata(self, df, ctx):
        # Metadata enrichment
-        df = df.withColumn("source_file", sf.input_file_name())
-        df = df.withColumn("ingestion_ts", sf.lit(ctx.process_timestamp))
-        df = df.withColumn("execution_date", sf.lit(ctx.process_date))
-        df = df.withColumn("run_id", sf.lit(ctx.run_id))
-        df = df.withColumn("job_name", sf.lit(ctx.process_name))
-        df = df.withColumn("process_id", sf.lit(ctx.process_id))
-        df = df.withColumn("pipeline_version", sf.lit(ctx.pipeline_version))
-        df = df.withColumn("is_backfill", sf.lit(ctx.is_backfill))
-        df = df.withColumn("trade_year", sf.year("trade_date"))
+        meta_cols = {
+            "source_file": sf.input_file_name(),
+            "ingestion_ts": sf.lit(ctx.process.process_timestamp),
+            "execution_date": sf.lit(ctx.process.process_date),
+            "run_id": sf.lit(ctx.process.run_id),
+            "job_name": sf.lit(ctx.process.process_name),
+            "process_id": sf.lit(ctx.process.process_id),
+            "pipeline_version": sf.lit(ctx.process.pipeline_version),
+            "is_backfill": sf.lit(ctx.process.is_backfill),
+            "trade_year": sf.year("trade_date")
+        }
+        for col, expr in meta_cols.items():
+            df = df.withColumn(col, expr)
+
         return df
     
-    def enforce_schema(self, df, schema, logger=None, strict=True, stage="unknown"):
-        """
-        Enforces a schema contract.
-
-        strict=True:
-        - missing columns -> error
-        - extra columns -> error
-
-        strict=False:
-        - missing columns -> add as null
-        - extra columns -> drop
-        """
-
-        expected_cols = {field.name for field in schema}
-        actual_cols = set(df.columns)
-        extra_cols = actual_cols - expected_cols
-        missing_cols = expected_cols - actual_cols
-
-        if strict:
-            errors = []
-            if missing_cols:
-                errors.append(f"[{stage}] Missing columns: {sorted(missing_cols)}")
-            if extra_cols:
-                errors.append(f"[{stage}] Extra columns: {sorted(extra_cols)}")
-            if errors:
-                msg = f"[{stage}] Schema validation failed: " + "; ".join(errors)
-                if logger:
-                    logger.error(msg)
-                raise ValueError(msg)
-
-            # Column order enforcement
-            return df.select([f.name for f in schema])
-        # ---------------------------
-        # STRICT MODE: FALSE
-        # ---------------------------
-
-        for field in missing_cols:
-            df = df.withColumn(field, sf.lit(None).cast(schema[field].dataType))
-            if logger:
-                logger.warning(f"[{stage}] Missing column added as null: {field}")
-        
-        if extra_cols:
-            if logger:
-                logger.warning(f"[{stage}] Extra columns dropped: {sorted(extra_cols)}")
-            df = df.drop(*extra_cols)
-        
-        return df.select([f.name for f in schema])
+    
     
     def _post_etl_cleanup(self, ctx):
         try:
             self.logger.info("Running Iceberg cleanup")
 
-            one_hour_ago = ctx.process_timestamp - timedelta(days=1)
+            one_hour_ago = ctx.process.process_timestamp - timedelta(days=1)
             timestamp_str = one_hour_ago.strftime("%Y-%m-%d %H:%M:%S")
 
             # self.spark.table(self.table_name).remove_orphan_files() \
@@ -273,7 +271,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
             self.spark.sql(f"""
                 CALL local.system.expire_snapshots(
-                    table => 'market_lakehouse.intgr_bronze_nse_historical_prices_raw',
+                    table => '{self.table_name}',
                     older_than => TIMESTAMP '{timestamp_str}',
                     retain_last => 1
                 )
@@ -281,48 +279,141 @@ class NSEHistoricalDataPipeline(PipelineBase):
 
             self.spark.sql(f"""
                 CALL local.system.remove_orphan_files(
-                    table => 'market_lakehouse.intgr_bronze_nse_historical_prices_raw',
+                    table => '{self.table_name}',
                     older_than => TIMESTAMP '{timestamp_str}'
                 )
             """)
         except Exception as e:
             self.logger.error(f"Error during post-etl cleanup: {e}")
-            raise
+            raise e
+
+@dataclass(frozen=True)
+class PipelineArgs:
+    env: str
+    load_type: str
+    is_backfill: bool
+    run_id: Optional[str]
+    process_id: Optional[str]
+    input_pattern: Optional[str]
+    
+def build_pipeline_args(ns: argparse.Namespace) -> PipelineArgs:
+    return PipelineArgs(
+        env=ns.env,
+        load_type=ns.load_type,
+        is_backfill=ns.is_backfill,
+        run_id=ns.run_id,
+        process_id=ns.process_id,
+        input_pattern=ns.input_pattern,
+    )
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="NSE Historical Data Pipeline")
 
 
+    parser.add_argument(
+        "--env",
+        default=os.getenv("QDP_ENV", "local"),
+        help="Execution environment (local/dev/prod)"
 
+    )
+
+    parser.add_argument(
+        "--is-backfill",
+        action="store_true",
+        help="Run pipeline in backfill mode"
+
+    )
+
+    parser.add_argument(
+        "--run-id",
+        help="Override run_id (otherwise auto-generated)"
+
+    )
+
+    parser.add_argument(
+        "--process-id",
+        help="Override process_id"
+
+    )
+
+    parser.add_argument(
+        "--input-pattern",
+        help="Override input file pattern"
+
+    )
+
+    parser.add_argument(
+        "--execution-date",
+        help="Execution date (YYYY-MM-DD), useful for backfills"
+
+    )
+
+    return parser.parse_args()
+    
 # ==========================
 # Main entrypoint
 # ==========================
-if __name__ == "__main__":
+def main():
+    # ==========================
+    # Environment setup
+    # ==========================
+    args = parse_args()
+
+    ENV = args.env
+    conf_file = f"./config/ingestion/nse/historical/{ENV}_nse_historical_load.yaml"
+    CONFIG = load_config(ENV, conf_file)
+    
+    # Apply command line overrides
+    for attr in ["run_id", "process_id", "input_pattern", "execution_date", "is_backfill"]:
+        val = getattr(args, attr, None)
+        if val is not None:
+            CONFIG[attr] = val
+    
+
+
+    # Compute log paths early
+    app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_historical_load_app.log"
+    spark_log_file = CONFIG.get("spark_log_file") or f"./logs/{ENV}_historical_load_spark.log"
+    # ==========================
     # Initialize logger
+    # ==========================
     logger = QDPLogger(
         name=f"{ENV}_historical_load",
-        app_log_file=CONFIG.get("app_log_file"),
-        spark_log_file=CONFIG.get("spark_log_file"),
+        app_log_file=app_log_file,
+        spark_log_file=spark_log_file,
         level=QDPLogger.INFO
     )
+
+    spark = None
     try:
+        # ==========================
+        # Initialize Spark Session
+        # ==========================
+        warehouse_path = CONFIG.get("warehouse_path", "./warehouse")
+        catalog_name = CONFIG.get("catalog_name", "local")
+
         spark = SparkSessionBuilder(
-                    app_name="qdp-local",
-                    environment="local",
-                ).get_spark()
-
-        # Environment-aware log paths
-        app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_historical_load_app.log"
-        spark_log_file = CONFIG.get("spark_log_file") or f"./logs/{ENV}_historical_load_spark.log"
-
-        
+            app_name=f"qdp-{ENV}-nse-historical-load",
+            environment=ENV,
+            warehouse_path=warehouse_path,
+            catalog_name=catalog_name
+        ).get_spark()
+            
         logger.attach_spark_logs(spark)
 
-        logger.info(f"Starting historical data load [{ENV}] at {datetime.now(timezone.utc)}")
-
+        # ==========================
+        # Create pipeline and run
+        # ==========================
         pipeline = PipelineFactory.get_pipeline("nse_historical", spark, logger, CONFIG)
         pipeline.run()
 
-        logger.info(f"Ending historical data load [{ENV}] at {datetime.now(timezone.utc)}")
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise
     finally:
-        spark.stop()
+        if spark:
+            spark.stop()
+            logger.info("Spark session stopped.")
+
+if __name__ == "__main__":
+    main()
