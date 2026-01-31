@@ -4,6 +4,16 @@ from pyspark.sql.types import MapType, StringType,IntegerType,DoubleType,Decimal
 def normalize_column_names(df):
     return df.select([sf.col(c).alias(c.strip().lower().replace(" ", "_")) for c in df.columns])
 
+def trim_and_nullify_strings(df):
+    return df.select([
+        sf.when(sf.trim(sf.col(c)) == "", None)
+        .otherwise(sf.trim(sf.col(c)))
+        .alias(c)
+        if isinstance(df.schema[c].dataType, StringType)
+        else sf.col(c)
+        for c in df.columns
+    ])
+
 def standardize_date(df, col_names, src_format):
 
     for c in col_names:
