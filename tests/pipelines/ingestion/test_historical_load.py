@@ -1,5 +1,5 @@
 from pyspark.sql import Row
-from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA
+from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA 
 from core.context.process_context import create_process_context
 from core.logging.logging import QDPLogger
 from core.spark_dataframe.transforms import normalize_column_names
@@ -30,8 +30,8 @@ def test_transform_renames_and_casts(pipeline, spark):
         Row(date="2022-01-02", open="106.0", high="112.0", low="104.0", close="108.0", volume="1500", dividends="0.0", stock_splits="0"),
     ]
     input_df = spark.createDataFrame(input_data)
-
-    ctx = create_process_context(
+    ctx = pipeline.create_execution_context()
+    proc_ctx = create_process_context(
         pipeline_version="v1.0",
         is_backfill=False,
         process_id="test",
@@ -41,6 +41,7 @@ def test_transform_renames_and_casts(pipeline, spark):
         force_new_run_id=False,
         orchestrator_context=None
     )
+    ctx.process = proc_ctx
 
     transformed_df = pipeline.transform(input_df, ctx)
     result = transformed_df.collect()
@@ -92,7 +93,7 @@ def test_metadata_columns_added(pipeline, spark):
     ]
     input_df = spark.createDataFrame(input_data)
 
-    ctx = create_process_context(
+    proc_ctx = create_process_context(
         pipeline_version="v1.0",
         is_backfill=False,
         process_id="test_process",
@@ -103,6 +104,8 @@ def test_metadata_columns_added(pipeline, spark):
         orchestrator_context=None
     )
 
+    ctx = pipeline.create_execution_context()
+    ctx.process = proc_ctx
     transformed_df = pipeline.transform(input_df, ctx)
     result = transformed_df.collect()
 

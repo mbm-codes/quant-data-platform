@@ -1,4 +1,12 @@
+pipeline_version: "v1.0"
+process_name: "test_nse_bhavcopy_daily_bronze_to_silver_load"
+run_id: "1"
+process_id: "test_nse_bhavcopy_daily_bronze_to_silver"
+
+
 input_tables:
   brnz_nse_bhavcopy_daily: "local.market_lakehouse.bronze_nse_daily_bhavcopy_raw"
 
 output_table: "local.market_lakehouse.intgr_slvr_nse_bhavcopy_daily_from_30_oct_2023"
+
+load_type: "full"

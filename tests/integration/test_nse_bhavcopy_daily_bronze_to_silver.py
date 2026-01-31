@@ -52,7 +52,9 @@ def test_nse_bhavcopy_daily_end_to_end(spark):
         logger=logger,
         config=config
     )
-    ctx = create_process_context(
+
+    ctx = pipeline.create_execution_context()
+    proc_ctx = create_process_context(
         pipeline_version="v1.0",
         is_backfill=False,
         process_id="int_test_nse_bhavcopy_daily_brz_to_silver",
@@ -62,6 +64,8 @@ def test_nse_bhavcopy_daily_end_to_end(spark):
         force_new_run_id=False,
         orchestrator_context=None
     )
+
+    ctx.process = proc_ctx
 
     mock_data = [
         # Before 2023-10-30
