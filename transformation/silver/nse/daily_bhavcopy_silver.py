@@ -1,3 +1,4 @@
+import argparse
 from core.pipeline.transformation_base import SilverPipelineBase
 from core.pipeline.transformation_factory import TransformationPipelineFactory
 from pyspark.sql import DataFrame, functions as sf
@@ -106,12 +107,12 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
     def _add_metadata(self, df, ctx):
         # Metadata enrichment
         meta_cols = {
-            "ingestion_ts": sf.lit(ctx.process_timestamp),
-            "execution_date": sf.lit(ctx.process_date),
-            "run_id": sf.lit(ctx.run_id),
-            "job_name": sf.lit(ctx.process_name),
-            "process_id": sf.lit(ctx.process_id),
-            "pipeline_version": sf.lit(ctx.pipeline_version),
+            "ingestion_ts": sf.lit(ctx.process.process_timestamp),
+            "execution_date": sf.lit(ctx.process.process_date),
+            "run_id": sf.lit(ctx.process.run_id),
+            "job_name": sf.lit(ctx.process.process_name),
+            "process_id": sf.lit(ctx.process.process_id),
+            "pipeline_version": sf.lit(ctx.process.pipeline_version),
             "trade_year": sf.year("trade_date")
         }
         for col, expr in meta_cols.items():
@@ -128,29 +129,90 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
     
     def read_silver(self) -> Union[DataFrame, dict]:
         return super().read_silver()
+    
+    def create_execution_context(self):
+        return super().create_execution_context()
 
     def run(self):
-        ctx = create_process_context(
-            pipeline_version=self.config["pipeline_version"],
-            is_backfill=False,
-            process_id=self.config["process_id"],
-            run_id=self.config["run_id"],
-            process_name=self.config["process_name"],
-            spark=self.spark,
-            force_new_run_id=False,
-            orchestrator_context=None
-        )
-        self.logger.info(f"Process Context: {process_context_to_string(ctx)}")
-        self.pre_etl(ctx)
-        df = self.extract()
-        df = self.transform(df, ctx)
-        self.load(df)
-        self.post_etl(ctx)
+    
+        ctx = self.create_execution_context()
+    
+        self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
+
+        load_type = self.config.get("load_type", "full")
+        try:
+            ctx.job_control.start_run(load_type=load_type)
+            self.logger.info(f"Job started with run_id: {ctx.process.run_id}")
+            self.pre_etl(ctx)
+            df = self.extract()
+            df = self.transform(df, ctx)
+            self.load(df)
+            self.post_etl(ctx)
+
+            # Mark success
+
+            max_ts = df.agg({"trade_date": "max"}).collect()[0][0] if isinstance(df, DataFrame) else None
+            rows_written = df.count() if isinstance(df, DataFrame) else None
+            ctx.job_control.mark_success(max_ts, rows_written)
+
+            self.logger.info(f"Pipeline completed successfully. Rows written: {rows_written} ")
+        except Exception as e:
+            # Mark failure
+
+            ctx.job_control.mark_failure(str(e))
+            self.logger.error(f"Pipeline failed: {e}")
+            raise
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="NSE Daily Bhavcopy Pipeline")
+
+    parser.add_argument(
+        "--env",
+        default=os.getenv("QDP_ENV", "local"),
+        help="Execution environment (local/dev/prod)"
+
+    )
+
+    parser.add_argument(
+        "--is-backfill",
+        action="store_true",
+        help="Run pipeline in backfill mode"
+
+    )
+
+    parser.add_argument(
+        "--run-id",
+        help="Override run_id (otherwise auto-generated)"
+
+    )
+
+    parser.add_argument(
+        "--process-id",
+        help="Override process_id"
+
+    )
+
+    parser.add_argument(
+        "--input-pattern",
+        help="Override input file pattern"
+
+    )
+
+    parser.add_argument(
+        "--execution-date",
+        help="Execution date (YYYY-MM-DD), useful for backfills"
+
+    )
+
+    return parser.parse_args()
+
 
 def main():
     # ==========================
     # Environment setup
     # ==========================
+
+    args = parse_args()
 
     ENV = os.getenv("QDP_ENV", "local")
     conf_file = f"./config/transformation/{ENV}_slvr_nse_bhavcopy_daily.yaml"

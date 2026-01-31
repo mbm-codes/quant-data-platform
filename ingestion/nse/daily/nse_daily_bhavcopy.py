@@ -13,12 +13,14 @@ from core.config.loader import load_config
 from core.logging.logging import QDPLogger
 from pyspark.sql import functions as sf, DataFrame
 from pyspark.sql.types import StringType, StructField, StructType, DateType, DoubleType, LongType
-from core.spark_dataframe.transforms import normalize_column_names, standardize_date, cast_and_rename_columns
+from core.spark_dataframe.transforms import normalize_column_names, trim_and_nullify_strings, standardize_date, cast_and_rename_columns
 import copy
 import random
+import argparse
 from core.quality.checks import DataQualityChecks
 from core.spark_dataframe.actions import safe_count
 from core.spark_dataframe.schema import enforce_schema
+from core.context.process_context import process_context_to_string
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -89,7 +91,8 @@ class NSEDailyData(PipelineBase):
         date_list = get_dates()
         try:
             for dt in date_list:
-                fetch_data(base_url+dt+".csv", output_path, self.logger)
+                #fetch_data(base_url+dt+".csv", output_path, self.logger)
+                pass
         except Exception as e:
             self.logger.error(f"Error encountered : {str(e)}")
             raise
@@ -99,6 +102,7 @@ class NSEDailyData(PipelineBase):
         df = self.spark.read.options(header=True).csv(self.config["input_pattern"])
 
         df = normalize_column_names(df)
+        df = trim_and_nullify_strings(df)
         df, missing_cols_added = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
 
 
@@ -107,7 +111,6 @@ class NSEDailyData(PipelineBase):
         dq.assert_positive_values(df, self.config.get("data_quality_checks", {}).get("raw_input", {}).get("positive_values", []))
         self.logger.info(f"Data quality metrics: {dq.metrics} ")
 
-        df = normalize_column_names(df)
         self.logger.info(f"Input schema: {df.schema.simpleString()}")
 
         return df
@@ -149,13 +152,13 @@ class NSEDailyData(PipelineBase):
        # Metadata enrichment
         meta_cols = {
             "source_file": sf.input_file_name(),
-            "ingestion_ts": sf.lit(ctx.process_timestamp),
-            "execution_date": sf.lit(ctx.process_date),
-            "run_id": sf.lit(ctx.run_id),
-            "job_name": sf.lit(ctx.process_name),
-            "process_id": sf.lit(ctx.process_id),
-            "pipeline_version": sf.lit(ctx.pipeline_version),
-            "is_backfill": sf.lit(ctx.is_backfill),
+            "ingestion_ts": sf.lit(ctx.process.process_timestamp),
+            "execution_date": sf.lit(ctx.process.process_date),
+            "run_id": sf.lit(ctx.process.run_id),
+            "job_name": sf.lit(ctx.process.process_name),
+            "process_id": sf.lit(ctx.process.process_id),
+            "pipeline_version": sf.lit(ctx.process.pipeline_version),
+            "is_backfill": sf.lit(ctx.process.is_backfill),
             "trade_year": sf.year("date1")
         }
         for col, expr in meta_cols.items():
@@ -177,6 +180,37 @@ class NSEDailyData(PipelineBase):
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
+
+    def run(self):
+    
+        ctx = self.create_execution_context()
+    
+        self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
+
+        load_type = self.config.get("load_type", "full")
+        try:
+            ctx.job_control.start_run(load_type=load_type)
+            self.logger.info(f"Job started with run_id: {ctx.process.run_id}")
+            self.pre_etl(ctx)
+            df = self.extract()
+            df = self.transform(df, ctx)
+            self.load(df)
+            self.post_etl(ctx)
+
+            # Mark success
+
+            max_ts = df.agg({"trade_date": "max"}).collect()[0][0] if isinstance(df, DataFrame) else None
+            rows_written = df.count() if isinstance(df, DataFrame) else None
+            ctx.job_control.mark_success(max_ts, rows_written)
+
+            self.logger.info(f"Pipeline completed successfully. Rows written: {rows_written} ")
+        except Exception as e:
+            # Mark failure
+
+            ctx.job_control.mark_failure(str(e))
+            self.logger.error(f"Pipeline failed: {e}")
+            raise
+
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -224,17 +258,68 @@ def fetch_data(url, output_path, logger):
     except requests.exceptions.RequestException as e:
         logger.error(f"Error encountered: {str(e)}")
 
-    
+def parse_args():
+    parser = argparse.ArgumentParser(description="NSE Daily Bhavcopy Pipeline")
 
 
+    parser.add_argument(
+        "--env",
+        default=os.getenv("QDP_ENV", "local"),
+        help="Execution environment (local/dev/prod)"
 
+    )
+
+    parser.add_argument(
+        "--is-backfill",
+        action="store_true",
+        help="Run pipeline in backfill mode"
+
+    )
+
+    parser.add_argument(
+        "--run-id",
+        help="Override run_id (otherwise auto-generated)"
+
+    )
+
+    parser.add_argument(
+        "--process-id",
+        help="Override process_id"
+
+    )
+
+    parser.add_argument(
+        "--input-pattern",
+        help="Override input file pattern"
+
+    )
+
+    parser.add_argument(
+        "--execution-date",
+        help="Execution date (YYYY-MM-DD), useful for backfills"
+
+    )
+
+    return parser.parse_args()
 
     
     
 if __name__ == "__main__":
+
+    # ==========================
+    # Environment setup
+    # ==========================
+    args = parse_args()
+
     ENV = os.getenv("QDP_ENV", "local")
     conf_file = f"./config/ingestion/nse/daily/{ENV}_nse_daily_bhavcopy_load.yaml"
     CONFIG = load_config(ENV, conf_file)
+
+    # Apply command line overrides
+    for attr in ["run_id", "process_id", "input_pattern", "execution_date", "is_backfill"]:
+        val = getattr(args, attr, None)
+        if val is not None:
+            CONFIG[attr] = val
     
     # Compute log paths early
     app_log_file = CONFIG.get("app_log_file") or f"./logs/{ENV}_nse_daily_bhavcopy_load_app.log"
@@ -265,16 +350,10 @@ if __name__ == "__main__":
         ).get_spark()
             
         logger.attach_spark_logs(spark)
-        start_ts = datetime.now(timezone.utc)
-        logger.info(f"Starting historical data load [{ENV}] at {start_ts}")
 
         pipeline = PipelineFactory.get_pipeline("nse_daily_bhavcopy_load", spark, logger, copy.deepcopy(CONFIG))
         pipeline.run()
 
-
-        end_ts = datetime.now(timezone.utc)
-        duration = (end_ts - start_ts).total_seconds()
-        logger.info(f"Ending historical data load [{ENV}] at {end_ts.isoformat()} | (Duration: {duration}s)")
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
