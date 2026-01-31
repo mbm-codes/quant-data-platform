@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS local.control_db.job_run (
+CREATE TABLE IF NOT EXISTS local.control_db.job_run_audit (
   job_name STRING,
   run_id STRING,
   load_type STRING,
@@ -12,7 +12,7 @@ USING ICEBERG
 PARTITIONED BY (job_name);
 
 
-CREATE TABLE IF NOT EXISTS local.control_db.job_watermark (
+CREATE TABLE IF NOT EXISTS local.control_db.job_state (
   job_name STRING,
   last_successful_load_ts TIMESTAMP,
   last_run_id STRING,
