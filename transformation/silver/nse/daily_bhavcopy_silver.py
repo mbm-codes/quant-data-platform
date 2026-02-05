@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 import os
 import copy
 from pyspark.sql.window import Window
+from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.table_checks import build_table_checks
+from core.quality.runner import DataQualityRunner
 
 
 class NSEDailyBhavcopySilver(SilverPipelineBase):
@@ -52,7 +55,25 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
             else:
                 raise ValueError("df_or_dfs must be a DataFrame or dict")
             
-          
+            dq_cfg = self.config.get("data_quality", None)
+            col_dq_checks = []
+            tbl_dq_checks = []
+            col_checks = []
+            tbl_checks = []
+
+            if dq_cfg:
+                col_dq_checks = dq_cfg.get("column_checks", [])
+                tbl_dq_checks = dq_cfg.get("table_checks", [])
+            
+            col_checks = build_column_checks(df, col_dq_checks)
+            tbl_checks = build_table_checks(df, tbl_dq_checks)
+            runner = DataQualityRunner(col_checks + tbl_checks, self.logger)
+            results = runner.run()
+
+            for r in results:
+                if r.status.value == "FAIL":
+                    raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
+
 
             df = df.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year")
             df = self.apply_business_rules(df)
@@ -99,7 +120,7 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
 
         self.logger.info(f"Record count before deduping, {safe_count(df)}")
 
-        df_clean = df.filter(sf.col("trade_date") >= "2023-10-30").dropDuplicates()
+        df_clean = df.filter(sf.col("trade_date") >= "2023-10-30").dropDuplicates(["trade_date", "series", "symbol"])
         self.logger.info(f"Record count after deduping, {safe_count(df_clean)}")
        
         return df_clean

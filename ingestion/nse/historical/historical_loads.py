@@ -25,7 +25,11 @@ from core.config.loader import load_config
 from core.spark_dataframe.transforms import normalize_column_names, trim_and_nullify_strings
 from core.spark_dataframe.actions import safe_count
 from core.spark_dataframe.schema import enforce_schema
-    
+from core.quality.runner import DataQualityRunner
+from core.quality.factory.file_checks import build_file_checks
+from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.table_checks import build_table_checks
+
 # ==========================
 # Schemas and DDLs
 # ==========================
@@ -118,19 +122,27 @@ class NSEHistoricalDataPipeline(PipelineBase):
     def extract(self):
         try:
             self.logger.info(f"Reading historical files from {self.config['input_pattern']}")
+            
+            dq_cfg = self.config.get("data_quality", None)
+
+            fc_dq_checks = {}
+            if dq_cfg:
+                fc_dq_checks = dq_cfg.get("file_checks", [])
+
+            file_checks = build_file_checks(self.spark, fc_dq_checks, self.config["input_pattern"])
+            runner = DataQualityRunner(file_checks, self.logger)
+            results = runner.run()
+
+            for r in results:
+                if r.status.value == "FAIL":
+                    raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
+            
             df = self.spark.read.options(header=True).csv(self.config["input_pattern"])
             self.logger.debug(f"Input schema: {df.schema.simpleString()}")
           
             df = normalize_column_names(df)
             df = trim_and_nullify_strings(df)
-            df, missing_cols_added = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
-            # --------------------------
-            # Data Quality Checks
-            # --------------------------
-            dq = DataQualityChecks(logger=self.logger)
-            dq.assert_no_nulls(df, [c for c in df.columns if c not in missing_cols_added ])
-            dq.assert_positive_values(df, self.config.get("data_quality_checks", {}).get("raw_input", {}).get("positive_values", []))
-            self.logger.info(f"Data quality metrics: {dq.metrics} ")
+            df, _ = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
 
             return df
         except Exception as e:
@@ -148,9 +160,29 @@ class NSEHistoricalDataPipeline(PipelineBase):
             else:
                 raise ValueError("df_or_dfs must be a DataFrame or dict")
 
+            dq_cfg = self.config.get("data_quality", None)
+
+            col_dq_checks = []
+            if dq_cfg:
+                col_dq_checks = dq_cfg.get("column_checks", [])
+
+            col_checks = []
+            col_checks = build_column_checks(df, col_dq_checks)
+            runner = DataQualityRunner(col_checks, self.logger)
+            results = runner.run()            
+
             df = self._derive_business_fields(df)
             
             df = self._add_metadata(df, ctx)
+
+            tbl_dq_checks = []
+            if dq_cfg:
+                tbl_dq_checks = dq_cfg.get("table_checks", [])
+            
+            tbl_checks = []
+            tbl_checks = build_table_checks(df, tbl_dq_checks)
+            runner = DataQualityRunner(tbl_checks, self.logger)
+            results = runner.run()
 
             df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
 

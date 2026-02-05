@@ -11,7 +11,9 @@ from lakehouse.iceberg.spark_session import SparkSessionBuilder
 from datetime import datetime, timezone
 import os
 import copy
-
+from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.table_checks import build_table_checks
+from core.quality.runner import DataQualityRunner
 
 class NSEHistoricalSilver(SilverPipelineBase):
     def __init__(self, spark, logger, config):
@@ -19,8 +21,6 @@ class NSEHistoricalSilver(SilverPipelineBase):
         self.logger = logger
         self.config = config
         self.input_table_names = config["input_tables"]
-        #self.raw_schema_strict = config["schema"]["raw"]["strict"]
-        #self.output_schema_strict = config["schema"]["output"]["strict"]
         self.output_table_name = config["output_table"]
 
     def pre_etl(self, ctx):
@@ -52,7 +52,26 @@ class NSEHistoricalSilver(SilverPipelineBase):
                 df = next(iter(df_or_dfs.values()))
             else:
                 raise ValueError("df_or_dfs must be a DataFrame or dict")
+
+            dq_cfg = self.config.get("data_quality", None)
+            col_dq_checks = []
+            tbl_dq_checks = []
+            col_checks = []
+            tbl_checks = []
+
+            if dq_cfg:
+                col_dq_checks = dq_cfg.get("column_checks", [])
+                tbl_dq_checks = dq_cfg.get("table_checks", [])
             
+            col_checks = build_column_checks(df, col_dq_checks)
+            tbl_checks = build_table_checks(df, tbl_dq_checks)
+            runner = DataQualityRunner(col_checks + tbl_checks, self.logger)
+            results = runner.run()
+
+            for r in results:
+                if r.status.value == "FAIL":
+                    raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
+
 
             df = df.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year")
             df = self.apply_business_rules(df)
@@ -97,7 +116,7 @@ class NSEHistoricalSilver(SilverPipelineBase):
         df_filtered = df.filter(sf.col("trade_date") < "2023-10-30")
         self.logger.info(f"Record count after filtering data out on or after 2023-10-30, {safe_count(df)}")
         
-        df_clean = df_filtered.dropDuplicates()
+        df_clean = df_filtered.dropDuplicates(["trade_date", "symbol"])
         self.logger.info(f"Record count after deduping, {safe_count(df)}")
        
         return df_clean
