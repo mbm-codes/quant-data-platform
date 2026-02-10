@@ -29,6 +29,7 @@ from core.quality.runner import DataQualityRunner
 from core.quality.factory.file_checks import build_file_checks
 from core.quality.factory.column_checks import build_column_checks
 from core.quality.factory.table_checks import build_table_checks
+from core.quality.actions import apply_actions
 
 # ==========================
 # Schemas and DDLs
@@ -73,13 +74,13 @@ create_table_ddl = """
         CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw (
             symbol STRING,
             trade_date DATE,
-            open_price DOUBLE,
-            high_price DOUBLE,
-            low_price DOUBLE,
-            close_price DOUBLE,
+            open_price DECIMAL(20,8),
+            high_price DECIMAL(20,8),
+            low_price DECIMAL(20,8),
+            close_price DECIMAL(20,8),
             volume_qty BIGINT,
-            dividends DOUBLE,
-            stock_splits DOUBLE,
+            dividends DECIMAL(20,8),
+            stock_splits DECIMAL(20,8),
             exchange STRING,
             data_src STRING,        
             source_file STRING,        
@@ -112,8 +113,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
     # --------------------------
     def pre_etl(self, ctx):
         self.logger.info("Running pre-etl steps for NSE Historical Data Pipeline")
-        self.spark.sql("DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw")  
-        self.spark.sql(create_table_ddl)
+        #self.spark.sql("DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw")  
+        #self.spark.sql(create_table_ddl)
     
     def post_etl(self, ctx):
         self.logger.info("Running post-etl steps for NSE Historical Data Pipeline")
@@ -153,44 +154,44 @@ class NSEHistoricalDataPipeline(PipelineBase):
     def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
             self.logger.info("Starting transformations on historical data")
-            if isinstance(df_or_dfs, DataFrame):
-                df = df_or_dfs
-            elif isinstance(df_or_dfs, dict):
-                df = next(iter(df_or_dfs.values()))
-            else:
-                raise ValueError("df_or_dfs must be a DataFrame or dict")
 
-            dq_cfg = self.config.get("data_quality", None)
+            df = self._extract_df(df_or_dfs)
 
-            col_dq_checks = []
-            if dq_cfg:
-                col_dq_checks = dq_cfg.get("column_checks", [])
+            dq_cfg = self.config.get("data_quality") or {}
+            col_checks = build_column_checks(df, dq_cfg.get("column_checks", []))
+            tbl_checks = build_table_checks(df, dq_cfg.get("table_checks", []))
 
-            col_checks = []
-            col_checks = build_column_checks(df, col_dq_checks)
-            runner = DataQualityRunner(col_checks, self.logger)
-            results = runner.run()            
+            results = []
+            checks = col_checks + tbl_checks
+            if checks:
+                runner = DataQualityRunner(checks, self.logger)
+                results = runner.run()
 
-            df = self._derive_business_fields(df)
-            
-            df = self._add_metadata(df, ctx)
+            updt_df = apply_actions(
+                self.spark,
+                ctx,
+                df,
+                results
+            )
 
-            tbl_dq_checks = []
-            if dq_cfg:
-                tbl_dq_checks = dq_cfg.get("table_checks", [])
-            
-            tbl_checks = []
-            tbl_checks = build_table_checks(df, tbl_dq_checks)
-            runner = DataQualityRunner(tbl_checks, self.logger)
-            results = runner.run()
+            res_df = updt_df if updt_df is not None else df
 
-            df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
+            res_df = self._derive_business_fields(res_df)
+            res_df = self._add_metadata(res_df, ctx)
 
-           
-            self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-            return df
-        except Exception as e:
-            self.logger.error(f"Error transforming historical data: {e}")
+            res_df, _ = enforce_schema(
+                res_df,
+                EXPECTED_OUTPUT_SCHEMA,
+                logger=self.logger,
+                strict=self.output_schema_strict,
+                stage="output",
+            )
+
+            self.logger.debug(f"Transformed schema: {res_df.schema.simpleString()}")
+            return res_df
+
+        except Exception:
+            self.logger.exception("Error transforming historical data")
             raise
         
 
@@ -241,7 +242,16 @@ class NSEHistoricalDataPipeline(PipelineBase):
             ctx.job_control.mark_failure(str(e))
             self.logger.error(f"Pipeline failed: {e}")
             raise
-        
+    
+    def _extract_df(self, df_or_dfs) -> DataFrame:
+        if isinstance(df_or_dfs, DataFrame):
+            return df_or_dfs
+        if isinstance(df_or_dfs, dict):
+            if not df_or_dfs:
+                raise ValueError("df_or_dfs dict is empty")
+            return next(iter(df_or_dfs.values()))
+        raise TypeError("df_or_dfs must be a DataFrame or dict[str, DataFrame]")
+
 
     def _derive_business_fields(self, df):
         # Extract symbol from filename
@@ -260,8 +270,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
             if src_col in df.columns:
                 df = df.withColumn(dst_col, sf.col(src_col).cast(dtype)).drop(src_col)
 
-        df = df.withColumn("dividends", sf.col("dividends").cast("double"))
-        df = df.withColumn("stock_splits", sf.col("stock_splits").cast("double"))
+        df = df.withColumn("dividends", sf.col("dividends").cast("decimal(20,8)"))
+        df = df.withColumn("stock_splits", sf.col("stock_splits").cast("decimal(20,8)"))
 
         # Add static columns
         for col, val in self.config.get("static_columns", {}).items():

@@ -15,6 +15,7 @@ from pyspark.sql.window import Window
 from core.quality.factory.column_checks import build_column_checks
 from core.quality.factory.table_checks import build_table_checks
 from core.quality.runner import DataQualityRunner
+from core.quality.actions import apply_actions
 
 
 class NSEDailyBhavcopySilver(SilverPipelineBase):
@@ -48,40 +49,37 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
     def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
             self.logger.info(f"Starting transformations on {''.join(self.config['input_tables'].values())}")
-            if isinstance(df_or_dfs, DataFrame):
-                df = df_or_dfs
-            elif isinstance(df_or_dfs, dict):
-                df = next(iter(df_or_dfs.values()))
-            else:
-                raise ValueError("df_or_dfs must be a DataFrame or dict")
-            
-            dq_cfg = self.config.get("data_quality", None)
-            col_dq_checks = []
-            tbl_dq_checks = []
-            col_checks = []
-            tbl_checks = []
+            df = self._extract_df(df_or_dfs)
 
-            if dq_cfg:
-                col_dq_checks = dq_cfg.get("column_checks", [])
-                tbl_dq_checks = dq_cfg.get("table_checks", [])
-            
-            col_checks = build_column_checks(df, col_dq_checks)
-            tbl_checks = build_table_checks(df, tbl_dq_checks)
-            runner = DataQualityRunner(col_checks + tbl_checks, self.logger)
-            results = runner.run()
+            dq_cfg = self.config.get("data_quality") or {}
+            col_checks = build_column_checks(df, dq_cfg.get("column_checks", []))
+            tbl_checks = build_table_checks(df, dq_cfg.get("table_checks", []))
 
+            results = []
+            checks = col_checks + tbl_checks
+            if checks:
+                runner = DataQualityRunner(checks, self.logger)
+                results = runner.run()
+            
             for r in results:
                 if r.status.value == "FAIL":
                     raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
 
+            updt_df = apply_actions(
+                self.spark,
+                ctx,
+                df,
+                results
+            )
 
-            df = df.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year")
-            df = self.apply_business_rules(df)
-            df = self._add_metadata(df, ctx)
+            res_df = updt_df if updt_df is not None else df
+            
+            res_df = res_df.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year")
+            res_df = self.apply_business_rules(res_df)
+            res_df = self._add_metadata(res_df, ctx)
 
-        
-            self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-            return df
+            self.logger.debug(f"Transformed schema: {res_df.schema.simpleString()}")
+            return res_df
         except Exception as e:
             self.logger.error(f"Error transforming NSE Bhavcopy bronze layer -> silver layer: {e}")
             raise
@@ -120,10 +118,19 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
 
         self.logger.info(f"Record count before deduping, {safe_count(df)}")
 
-        df_clean = df.filter(sf.col("trade_date") >= "2023-10-30").dropDuplicates(["trade_date", "series", "symbol"])
+        df_clean = df.filter(sf.col("trade_date") >= "2023-10-30") #.dropDuplicates(["trade_date", "series", "symbol"])
         self.logger.info(f"Record count after deduping, {safe_count(df_clean)}")
        
         return df_clean
+    
+    def _extract_df(self, df_or_dfs) -> DataFrame:
+        if isinstance(df_or_dfs, DataFrame):
+            return df_or_dfs
+        if isinstance(df_or_dfs, dict):
+            if not df_or_dfs:
+                raise ValueError("df_or_dfs dict is empty")
+            return next(iter(df_or_dfs.values()))
+        raise TypeError("df_or_dfs must be a DataFrame or dict[str, DataFrame]")
 
     def _add_metadata(self, df, ctx):
         # Metadata enrichment

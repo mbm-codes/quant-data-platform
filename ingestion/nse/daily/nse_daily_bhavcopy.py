@@ -25,6 +25,7 @@ from core.quality.factory.file_checks import build_file_checks
 from core.quality.factory.column_checks import build_column_checks
 from core.quality.factory.table_checks import build_table_checks
 from core.quality.runner import DataQualityRunner
+from core.quality.actions import apply_actions
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -144,46 +145,43 @@ class NSEDailyData(PipelineBase):
     
     def transform(self, df_or_dfs, ctx):
         try:
-            if isinstance(df_or_dfs, DataFrame):
-                df = df_or_dfs
-            elif isinstance(df_or_dfs, dict):
-                df = next(iter(df_or_dfs.values()))
-            else:
-                raise ValueError("df_or_dfs must be a DataFrame or dict")
+            df = self._extract_df(df_or_dfs)
 
-            dq_cfg = self.config.get("data_quality", None)
+            dq_cfg = self.config.get("data_quality") or {}
+            col_checks = build_column_checks(df, dq_cfg.get("column_checks", []))
+            tbl_checks = build_table_checks(df, dq_cfg.get("table_checks", []))
 
-            col_dq_checks = []
-            if dq_cfg:
-                col_dq_checks = dq_cfg.get("column_checks", [])
+            results = []
+            checks = col_checks + tbl_checks
+            if checks:
+                runner = DataQualityRunner(checks, self.logger)
+                results = runner.run()
+            
+            for r in results:
+                if r.status.value == "FAIL":
+                    raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
 
-            col_checks = []
-            col_checks = build_column_checks(df, col_dq_checks)
-            runner = DataQualityRunner(col_checks, self.logger)
-            results = runner.run()            
+            updt_df = apply_actions(
+                self.spark,
+                ctx,
+                df,
+                results
+            )
 
+            res_df = updt_df if updt_df is not None else df
 
-            df = standardize_date(df, ["date1"], "dd-MMM-yyyy")
-            df = self._add_metadata(df, ctx)
+            res_df = standardize_date(res_df, ["date1"], "dd-MMM-yyyy")
+            res_df = self._add_metadata(res_df, ctx)
             
             # Add static columns
             for col, val in self.config.get("static_columns", {}).items():
-                df = df.withColumn(col, sf.lit(val))
+                res_df = res_df.withColumn(col, sf.lit(val))
 
-            df = cast_and_rename_columns(df, self.config["casts"])
+            res_df = cast_and_rename_columns(res_df, self.config["casts"])
             
-            tbl_dq_checks = []
-            if dq_cfg:
-                tbl_dq_checks = dq_cfg.get("table_checks", [])
-            
-            tbl_checks = []
-            tbl_checks = build_table_checks(df, tbl_dq_checks)
-            runner = DataQualityRunner(tbl_checks, self.logger)
-            results = runner.run()
-            
-            df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
-            self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-            return df
+            res_df, _ = enforce_schema(res_df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
+            self.logger.debug(f"Transformed schema: {res_df.schema.simpleString()}")
+            return res_df
         except Exception as e:
             self.logger.error(f"Error transforming historical data: {e}")
             raise
@@ -220,6 +218,15 @@ class NSEDailyData(PipelineBase):
         except Exception as e:
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
+    
+    def _extract_df(self, df_or_dfs) -> DataFrame:
+        if isinstance(df_or_dfs, DataFrame):
+            return df_or_dfs
+        if isinstance(df_or_dfs, dict):
+            if not df_or_dfs:
+                raise ValueError("df_or_dfs dict is empty")
+            return next(iter(df_or_dfs.values()))
+        raise TypeError("df_or_dfs must be a DataFrame or dict[str, DataFrame]")
 
     def run(self):
     
