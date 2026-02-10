@@ -1,4 +1,4 @@
-from core.quality.results import CheckStatus
+from core.quality.results import CheckStatus, DQAction
 
 class DataQualityRunner:
     def __init__(self, checks: list, logger=None):
@@ -10,15 +10,11 @@ class DataQualityRunner:
             result = check.run()
             results.append(result)
 
-            if result.status == CheckStatus.FAIL:
-                #configurable later: fail fast vs continue
-                if self.logger:
+            if self.logger:
+                if result.status == CheckStatus.WARN:
+                    self.logger.warning(f"[WARN] {result.check_name}: {result.message}")
+                elif result.status == CheckStatus.FAIL:
                     self.logger.error(f"[FAIL] {result.check_name}: {result.message}")
-                raise ValueError(f"{result.check_name} check failed, hence failing the execution")
-            elif result.status == CheckStatus.WARN:
-                if self.logger:
-                    self.logger.warning(f"[WARN] {result.check_name}: {result.message} ")
-            else:
-                if self.logger:
-                    self.logger.info(f"[{result.status.value}] {result.check_name}")
+                else:
+                    self.logger.info(f"[INFO] {result.check_name}: {result.message}")
         return results
