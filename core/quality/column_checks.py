@@ -5,17 +5,28 @@ from pyspark.sql.functions import col, greatest, least
 from core.quality.base import DataQualityCheck
 from core.quality.results import CheckResult
 from core.quality.enums import CheckStatus, DQAction, DQSeverity
-
+from core.quality.policy import DQ_ACTION_MATRIX, decide_action
 
 class NotNullCheck(DataQualityCheck):
     """
     Ensures a column contains no NULL values.
     """
 
-    def __init__(self, df: DataFrame, column: str, severity: DQSeverity):
+    def __init__(
+            self, df: DataFrame, 
+            column: str, 
+            severity: DQSeverity, 
+            mostly: float, 
+            action_on_warn: DQAction, 
+            action_on_fail: DQAction
+        ):
+        
         self.df = df
         self.column = column
         self.severity = severity
+        self.mostly = mostly
+        self.action_on_warn = action_on_warn
+        self.action_on_fail = action_on_fail
 
     def run(self, context: Optional[Dict[str, Any]] = None) -> CheckResult:
         total_count = self.df.count()
@@ -25,24 +36,28 @@ class NotNullCheck(DataQualityCheck):
             return CheckResult(
                 check_name=f"NotNullCheck({self.column})",
                 status=CheckStatus.PASS,
+                action=DQAction.OBSERVE,
                 message="No null values found",
-                metrics={"row_count": total_count}
+                metrics={
+                    "row_count": total_count,
+                    "null_count": null_count,
+                    "null_ratio": null_count / total_count if total_count > 0 else 0.0
+                },
+                invalid_predicate=f"{self.column} IS NULL"
             )
 
-        status = CheckStatus.WARN
-        if self.severity == DQSeverity.WARN:
-            status = CheckStatus.WARN
-        elif self.severity == DQSeverity.FAIL:
-            status = CheckStatus.FAIL
-        else:
-            raise ValueError(f"Unrecognized severity for NotNullCheck on {self.column}")
- 
-      
+        null_ratio = null_count / total_count if total_count > 0 else 0
+        
+        status = CheckStatus.WARN if null_ratio >= self.mostly else CheckStatus.FAIL
+
+        dq_action = decide_action(status, self.severity, self.action_on_warn, self.action_on_fail)
 
         return CheckResult(
             check_name=f"NotNullCheck({self.column})",
             status=status,
+            action=dq_action,
             message=f"{null_count} null values found",
+            invalid_predicate=f"{self.column} IS NULL",
             metrics={
                 "row_count": total_count,
                 "null_count": null_count,
@@ -77,6 +92,8 @@ class ValueRangeCheck(DataQualityCheck):
         sample_percent: int = 100,
         tags: Optional[list[str]] = None,
         owner: Optional[str] = None,
+        action_on_warn: Optional[DQAction] = DQAction.NONE,
+        action_on_fail: Optional[DQAction] = DQAction.NONE
     ):
         if mostly <= 0 or mostly > 1:
             raise ValueError("mostly must be in the range (0, 1].")
@@ -97,6 +114,8 @@ class ValueRangeCheck(DataQualityCheck):
         self.sample_percent = sample_percent
         self.tags = tags or []
         self.owner = owner
+        self.action_on_warn = action_on_warn
+        self.action_on_fail = action_on_fail
 
     def run(self, context: Optional[Dict[str, Any]] = None) -> CheckResult:
         df = self.df
@@ -114,31 +133,20 @@ class ValueRangeCheck(DataQualityCheck):
             return CheckResult(
                 check_name=f"ValueRangeCheck({self.column})",
                 status=CheckStatus.PASS,
+                action=DQAction.OBSERVE,
                 message="No rows to validate",
-                metrics={"row_count": 0}
+                metrics={
+                "row_count": float(total_count),
+                "valid_count": float(0),
+                "invalid_count": float(0),
+                "valid_ratio": float(0),
+                "mostly": self.mostly,
+                "sample_percent": float(self.sample_percent),
+                }
             )
 
         column_expr = col(self.column)
 
-        # Optional type casting
-        if self.cast:
-            try:
-                column_expr = column_expr.cast(self.cast)
-            except Exception as exc:
-                if self.strict_type:
-                    raise
-                else:
-                    status = CheckStatus.FAIL
-                    if self.severity == DQSeverity.WARN:
-                        status = CheckStatus.WARN
-                    elif self.severity == DQSeverity.FAIL:
-                        status = CheckStatus.FAIL
-
-                    return CheckResult(
-                        check_name=f"ValueRangeCheck({self.column})",
-                        status=status,
-                        message=f"Failed to cast column to {self.cast}: {exc}",
-                    )
 
         # Build range condition
         conditions = []
@@ -162,25 +170,28 @@ class ValueRangeCheck(DataQualityCheck):
         valid_count = df.filter(range_condition).count()
         valid_ratio = valid_count / total_count
 
-        passed = valid_ratio >= self.mostly
-        if passed:
-            status = CheckStatus.PASS
-        elif self.severity == DQSeverity.WARN:
+        warn = valid_ratio >= self.mostly
+        if warn:
             status = CheckStatus.WARN
-        elif self.severity == DQSeverity.FAIL:
-            status = CheckStatus.FAIL
         else:
-            raise ValueError(f"Unrecognized severity for ValueRangeCheck on {self.column}")
+            status = CheckStatus.FAIL
         
+        dq_action = decide_action(status, self.severity, self.action_on_warn, self.action_on_fail)        
 
         default_message = (
             f"{valid_ratio:.2%} of values in '{self.column}' "
             f"are within the expected range"
         )
 
+        if self.where:
+            inv_predicate = f"NOT({self.where} AND {range_condition})"
+        else:
+            inv_predicate = f"NOT({range_condition})"
+
         return CheckResult(
             check_name=f"ValueRangeCheck({self.column})",
             status=status,
+            action=dq_action,
             message=self.message or default_message,
             metrics={
                 "row_count": float(total_count),
@@ -190,6 +201,7 @@ class ValueRangeCheck(DataQualityCheck):
                 "mostly": self.mostly,
                 "sample_percent": float(self.sample_percent),
             },
+            invalid_predicate=inv_predicate
         )
 
 class OHLCInvariantCheck(DataQualityCheck):
@@ -208,7 +220,9 @@ class OHLCInvariantCheck(DataQualityCheck):
             message: Optional[str] = None,
             sample_percent: int = 100,
             tags: Optional[List[str]] = None,
-            owner: Optional[str] = None
+            owner: Optional[str] = None,
+            action_on_warn: Optional[DQAction] = DQAction.NONE,
+            action_on_fail: Optional[DQAction] = DQAction.NONE,
     ):
     
         if mostly <= 0 or mostly > 1:
@@ -227,6 +241,8 @@ class OHLCInvariantCheck(DataQualityCheck):
         self.sample_percent = sample_percent
         self.tags = tags or []
         self.owner = owner
+        self.action_on_warn = action_on_warn
+        self.action_on_fail = action_on_fail
 
     def run(self, context: Optional[Dict[str, Any]] = None) -> CheckResult:
         df = self.df
@@ -244,8 +260,16 @@ class OHLCInvariantCheck(DataQualityCheck):
             return CheckResult(
                 check_name="OHLCInvariantCheck",
                 status=CheckStatus.PASS,
+                action=decide_action(CheckStatus.PASS, self.severity, self.action_on_warn, self.action_on_fail),
                 message="No rows to validate",
-                metrics={"row_count": 0.0},
+                metrics={
+                    "row_count": float(total_count),
+                    "valid_count": float(0),
+                    "invalid_count": float(0),
+                    "valid_ratio": float(0),
+                    "mostly": self.mostly,
+                    "sample_percent": float(self.sample_percent)
+                },
             )
 
         open_c = col(self.open_col)
@@ -272,17 +296,25 @@ class OHLCInvariantCheck(DataQualityCheck):
         valid_count = df.filter(invariant_condition).count()
         valid_ratio = valid_count / total_count
 
-        passed = valid_ratio >= self.mostly
+        warn = valid_ratio >= self.mostly
 
-        if passed:
-            status = CheckStatus.PASS
-        elif self.severity == DQSeverity.WARN:
+        if warn:
             status = CheckStatus.WARN
-        elif self.severity == DQSeverity.FAIL:
-            status = CheckStatus.FAIL
         else:
-            raise ValueError("Unrecognized severity for OHLCInvariantCheck")
+            status = CheckStatus.FAIL
 
+        dq_action = decide_action(status, self.severity, self.action_on_warn, self.action_on_fail)
+
+        inv_invariant_condition = f"""
+            (({self.high_col} >= greatest({self.open_col}, {self.close_col})) AND
+            ({self.low_col} <= least({self.open_col}, {self.close_col})) AND
+            ({self.high_col} >= {self.low_col}))
+        """
+
+        if not self.allow_null:
+            inv_predicate = f"NOT({inv_invariant_condition} AND ({self.open_col} IS NOT NULL AND {self.high_col} IS NOT NULL AND {self.close_col} IS NOT NULL AND {self.low_col} IS NOT NULL))" 
+        else:
+            inv_predicate = f"NOT({inv_invariant_condition})"
 
         default_message = (
             f"{valid_ratio: .2%} of rows satisfy OHLC invariants "
@@ -292,6 +324,7 @@ class OHLCInvariantCheck(DataQualityCheck):
         return CheckResult(
             check_name="OHLCInvariantcheck",
             status=status,
+            action=dq_action,
             message=self.message or default_message,
             metrics={
                 "row_count": float(total_count),
@@ -311,4 +344,5 @@ class OHLCInvariantCheck(DataQualityCheck):
                 "owner": self.owner,
 
             },
+            invalid_predicate=inv_predicate
         )

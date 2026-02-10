@@ -2,7 +2,7 @@ import os
 import glob
 from typing import List
 from core.quality.base import DataQualityCheck, CheckResult
-from core.quality.enums import CheckStatus
+from core.quality.enums import CheckStatus, DQAction
 
 
 class FileExistsCheck(DataQualityCheck):
@@ -37,6 +37,7 @@ class FileExistsCheck(DataQualityCheck):
             return CheckResult(
                 check_name="FileExistsCheck",
                 status=CheckStatus.PASS,
+                action=DQAction.OBSERVE,
                 message=f"Found {file_count} file(s) at path: {self.path}",
                 metrics={"file_count": file_count}
             )
@@ -44,6 +45,7 @@ class FileExistsCheck(DataQualityCheck):
         return CheckResult(
             check_name="FileExistsCheck",
             status=CheckStatus.FAIL,
+            action=DQAction.OBSERVE,
             message=(
                 f"Found {file_count} file(s) "
                 f"(min required: {self.min_files}) at path: {self.path}"
@@ -66,6 +68,7 @@ class NonEmptyFileCheck(DataQualityCheck):
                 return CheckResult(
                     check_name="NonEmptyFileCheck",
                     status=CheckStatus.PASS,
+                    action=DQAction.OBSERVE,
                     message=f"File has {row_count} rows",
                     metrics={"row_count": row_count}
                 )
@@ -73,6 +76,7 @@ class NonEmptyFileCheck(DataQualityCheck):
             return CheckResult(
                 check_name="NonEmptyFileCheck",
                 status=CheckStatus.FAIL,
+                action=DQAction.BLOCK,
                 message=f"File has only {row_count} rows (min required: {self.min_rows})",
                 metrics={"row_count": row_count}
 
@@ -82,5 +86,6 @@ class NonEmptyFileCheck(DataQualityCheck):
             return CheckResult(
                 check_name="NonEmptyFileCheck",
                 status=CheckStatus.FAIL,
+                action=DQAction.OBSERVE,
                 message=f"Failed to read file: {str(e)}"
             )

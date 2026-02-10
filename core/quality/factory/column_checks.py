@@ -1,5 +1,5 @@
 from core.quality.column_checks import NotNullCheck, ValueRangeCheck, OHLCInvariantCheck
-from core.quality.enums import CheckStatus, DQSeverity
+from core.quality.enums import CheckStatus, DQSeverity, DQAction
 
 def build_column_checks(df, cfg: list):
     checks = []
@@ -12,13 +12,16 @@ def build_column_checks(df, cfg: list):
 
         try:
             severity = DQSeverity(check.get("severity", DQSeverity.WARN))
+            mostly = float(check.get("mostly", 0.0))
+            action_on_warn = DQAction(check.get("action_on_warn", DQAction.NONE))
+            action_on_fail = DQAction(check.get("action_on_fail", DQAction.NONE))
         except ValueError:
             raise ValueError(f"Invalid CheckStatus: {check.get('severity')}, Check: {name}")
 
 
         if name == "not_null":
             for col in check.get("columns", []):
-                checks.append(NotNullCheck(df, col, severity))
+                checks.append(NotNullCheck(df, col, severity,mostly, action_on_warn, action_on_fail))
         elif name == "value_range":
             checks.append(ValueRangeCheck(
                 df=df,
@@ -37,6 +40,8 @@ def build_column_checks(df, cfg: list):
                 sample_percent=check.get("sample_percent"),
                 tags=check.get("tags"),
                 owner=check.get("owner"),
+                action_on_warn=action_on_warn,
+                action_on_fail=action_on_fail
             ))
         elif name == "ohlc_invariant":
             checks.append(OHLCInvariantCheck(
@@ -51,6 +56,8 @@ def build_column_checks(df, cfg: list):
                 severity=severity,
                 tags=check.get("tags"),
                 owner=check.get("owner"),
+                action_on_warn=action_on_warn,
+                action_on_fail=action_on_fail
             ))
         else:
             raise ValueError(f"Unknown column check: {name}")
