@@ -117,7 +117,6 @@ def test_only_rename_column(spark):
 
     # Create DataFrame
     df_input = spark.createDataFrame(raw_data, schema=schema)
-    print(df_input.schema.simpleString())
 
     RENAME_CONFIG = {
         # primitives
