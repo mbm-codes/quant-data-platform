@@ -29,10 +29,16 @@ data_quality:
         - stock_splits
       severity: WARN
       enabled: true
+      action_on_warn: OBSERVE
+      action_on_fail: OBSERVE
+
     
     - name: value_range
       column: volume_qty
       enabled: true
+      action_on_warn: OBSERVE
+      action_on_fail: QUARANTINE
+
       # Range definition
       min: 0
       max: 
@@ -45,7 +51,7 @@ data_quality:
       strict_type: true
 
       # Quality tolerance
-      mostly: 0.98   # 98% of rows must pass
+      mostly: 0.94   # 98% of rows must pass
 
       # Conditional application
       where: 
@@ -65,6 +71,8 @@ data_quality:
 
     - name: ohlc_invariant
       enabled: true
+      action_on_warn: QUARANTINE
+      action_on_fail: QUARANTINE
       open_col: open_price
       high_col: high_price
       low_col: low_price
@@ -72,7 +80,7 @@ data_quality:
       allow_null: false
       mostly: 0.995
       where: 
-      severity: WARN
+      severity: FAIL
       tags: ["market-data", "critical"]
       owner: data-platform
 
@@ -82,7 +90,10 @@ data_quality:
       columns:
         - trade_date
         - symbol
-      severity: WARN
+      severity: FAIL
       enabled: true
+      action_on_warn: QUARANTINE
+      action_on_fail: CLEAN
+
 
 

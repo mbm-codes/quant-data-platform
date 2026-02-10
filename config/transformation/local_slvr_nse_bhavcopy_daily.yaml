@@ -37,10 +37,16 @@ data_quality:
 
       severity: WARN
       enabled: true
+      action_on_warn: OBSERVE
+      action_on_fail: QUARANTINE
+
     
     - name: value_range
       column: ttl_trd_qnty
       enabled: true
+      action_on_warn: OBSERVE
+      action_on_fail: QUARANTINE
+
       # Range definition
       min: 0
       max: 
@@ -83,6 +89,10 @@ data_quality:
       severity: WARN
       tags: ["market-data", "critical"]
       owner: data-platform
+      action_on_warn: QUARANTINE
+      action_on_fail: QUARANTINE
+
+
 
 
   table_checks:
@@ -93,6 +103,9 @@ data_quality:
         - series
       severity: WARN
       enabled: true
+      action_on_warn: CLEAN
+      action_on_fail: CLEAN
+      mostly: 0.8
 
   
 
