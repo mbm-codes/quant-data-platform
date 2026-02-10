@@ -8,6 +8,7 @@ class CheckStatus(Enum):
 
 
 class DQAction(Enum):
+    NONE = "NONE"
     OBSERVE = "OBSERVE"
     CLEAN = "CLEAN"
     QUARANTINE = "QUARANTINE"
