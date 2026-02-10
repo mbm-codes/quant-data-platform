@@ -58,7 +58,7 @@ def write_quarantine_records(
         .save("local.market_lakehouse.quarantine_records")
     )
 
-def apply_actions(spark, ctx, df, check_results, run_id, dataset_name ):
+def apply_actions(spark, ctx, df, check_results ):
     quarantine_predicates = []
 
     #1 Block 
@@ -98,8 +98,8 @@ def apply_actions(spark, ctx, df, check_results, run_id, dataset_name ):
         write_quarantine_records(
             quarantined_df,
             result,
-            run_id,
-            dataset_name,
+            ctx.process.run_id,
+            ctx.process.process_name,
             spark, 
             ctx.process.process_timestamp
 
@@ -112,7 +112,6 @@ def apply_actions(spark, ctx, df, check_results, run_id, dataset_name ):
     ]
 
     for predicate in clean_predicates:
-        #df = df.filter(f"{pred}")
         orig_df = df
         df.createOrReplaceTempView("t")
         query = f"""
