@@ -1,4 +1,4 @@
-DROP TABLE IF EXISTS local.market_lakehouse.slvr_nse_historical_prices_till_29_oct_2023;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.slvr_nse_historical_prices_till_29_oct_2023 (
     symbol STRING,
     trade_date DATE,
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS local.market_lakehouse.slvr_nse_historical_prices_til
 PARTITIONED BY (trade_year);
 
 
-DROP TABLE IF EXISTS local.market_lakehouse.slvr_nse_bhavcopy_daily_from_30_oct_2023;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.slvr_nse_bhavcopy_daily_from_30_oct_2023 (
     symbol           STRING,
     series           STRING,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS local.market_lakehouse.slvr_nse_bhavcopy_daily_from_3
 ) USING PARQUET
 PARTITIONED BY (trade_year);
 
-DROP TABLE IF EXISTS local.market_lakehouse.slvr_nse_equity_data;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.slvr_nse_equity_data (
     symbol           STRING,
     trade_date       DATE,

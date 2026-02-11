@@ -1,5 +1,5 @@
 
-DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw (
     symbol STRING,
     trade_date DATE,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_historical_prices_r
 ) USING PARQUET
 PARTITIONED BY (trade_year);
 
-DROP TABLE IF EXISTS local.market_lakehouse.intgr_bronze_nse_historical_prices_raw;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.intgr_bronze_nse_historical_prices_raw (
     symbol STRING,
     trade_date DATE,
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS local.market_lakehouse.intgr_bronze_nse_historical_pr
 PARTITIONED BY (trade_year);
 
 
-DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_daily_bhavcopy_raw;
+
 CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_daily_bhavcopy_raw (
     symbol           STRING,
     series           STRING,
