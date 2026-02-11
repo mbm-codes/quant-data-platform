@@ -26,6 +26,9 @@ from core.quality.factory.column_checks import build_column_checks
 from core.quality.factory.table_checks import build_table_checks
 from core.quality.runner import DataQualityRunner
 from core.quality.actions import apply_actions
+from core.exceptions.exceptions import DQExecutionException, PipelineException, TransformationException
+from core.exceptions.errors import InputDataError, DataQualityError, SchemaEnforcementError, PipelineError, LoadError, PostETLError
+
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -80,16 +83,18 @@ EXPECTED_OUTPUT_SCHEMA = StructType([
 
 
 class NSEDailyData(PipelineBase):
-    def __init__(self, spark, logger, config):
+    def __init__(self, spark, logger, config, metrics):
         self.spark = spark
         self.logger = logger
         self.config = config
+        self.metrics = metrics
         self.table_name = config["output_table"]
         self.raw_schema_strict = config["schema"]["raw"]["strict"]
         self.output_schema_strict = config["schema"]["output"]["strict"]
 
     
     def extract(self):
+        start_ts = time.time()
         self.logger.info("Starting fetching NSE daily bhavcopy!")
         base_url = "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_"
         output_path = "data_sources/nse/nse_bhavcopy_from_nov_2023/"
@@ -114,13 +119,38 @@ class NSEDailyData(PipelineBase):
             runner = DataQualityRunner(file_checks, self.logger)
             results = runner.run()
 
-            for r in results:
-                if r.status.value == "FAIL":
+            self.metrics.gauge(
+                "pipeline.dq.checks.total",
+                len(results),
+                tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+            )
+
+            failed = [r for r in results if r.status.value == "FAIL"]
+
+            self.metrics.gauge(
+                "pipeline.dq.checks.failed",
+                len(failed),
+                tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+            )
+
+
+            for r in failed:
                     raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
 
 
             self.logger.info(f"Reading historical files from {self.config['input_pattern']}")
             df = self.spark.read.options(header=True).csv(self.config["input_pattern"])
+
+            row_count = safe_count(df, logger=self.logger)
+            self.metrics.gauge(
+                    "pipeline.extract.rows",
+                    row_count,
+                    tags={
+                        "pipeline": "nse_daily_bhavcopy",
+                        "layer": "bronze",
+                        "table": self.table_name
+                    }
+            )
 
             df = normalize_column_names(df)
             df = trim_and_nullify_strings(df)
@@ -154,19 +184,46 @@ class NSEDailyData(PipelineBase):
             results = []
             checks = col_checks + tbl_checks
             if checks:
-                runner = DataQualityRunner(checks, self.logger)
-                results = runner.run()
-            
-            for r in results:
-                if r.status.value == "FAIL":
-                    raise RuntimeError(f"DQ failed: {r.check_name} - {r.message}")
+                try:
+                    runner = DataQualityRunner(checks, self.logger)
+                    results = runner.run()
+                except Exception as e:
+                    raise DQExecutionException("Column/Table DQ execution failed") from e
 
-            updt_df = apply_actions(
-                self.spark,
-                ctx,
-                df,
-                results
-            )
+
+                self.metrics.gauge(
+                    "pipeline.dq.checks.total",
+                    len(results),
+                    tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+                )
+
+                failed = [r for r in results if r.status.value == "FAIL"]
+
+                self.metrics.gauge(
+                    "pipeline.dq.checks.failed",
+                    len(failed),
+                    tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+                )
+
+
+                if failed:
+                    self.metrics.increment(
+                        "pipeline.dq.failure",
+                        tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+                    )
+                    raise DataQualityError(
+                        "Transform-stage data quality checks failed",
+                        failed_checks=failed
+                    )
+            try:
+                updt_df = apply_actions(
+                    self.spark,
+                    ctx,
+                    df,
+                    results
+                )
+            except Exception as e:
+                raise TransformationException("Failed to apply DQ actions") from e
 
             res_df = updt_df if updt_df is not None else df
 
@@ -178,13 +235,39 @@ class NSEDailyData(PipelineBase):
                 res_df = res_df.withColumn(col, sf.lit(val))
 
             res_df = cast_and_rename_columns(res_df, self.config["casts"])
-            
-            res_df, _ = enforce_schema(res_df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
+            try:
+                res_df, _ = enforce_schema(
+                    res_df, 
+                    EXPECTED_OUTPUT_SCHEMA, 
+                    logger=self.logger, 
+                    strict=self.output_schema_strict, 
+                    stage="output"
+                )
+            except Exception as e:
+                 raise SchemaEnforcementError("Output schema enforcement failed") from e
+
+
+            row_count = safe_count(res_df, logger=self.logger)
+            self.metrics.gauge(
+                "pipeline.transform.rows",
+                row_count,
+                tags={
+                    "pipeline": "nse_daily_bhavcopy",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+
+            )
+
             self.logger.debug(f"Transformed schema: {res_df.schema.simpleString()}")
             return res_df
-        except Exception as e:
-            self.logger.error(f"Error transforming historical data: {e}")
+        except PipelineError:
+            self.logger.exception("Transform failed due to domain error")
             raise
+
+        except PipelineException as e:
+            self.logger.exception("Internal transform failure")
+            raise PipelineError("Transform step failed") from e
 
     def _add_metadata(self, df, ctx):
        # Metadata enrichment
@@ -209,13 +292,36 @@ class NSEDailyData(PipelineBase):
         self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
 
         if record_count is None or record_count == 0:
+            self.metrics.increment(
+                "pipeline.load.skipped",
+                tags={"pipeline": "nse_daily_bhavcopy"}
+            )
             self.logger.warning("No records to write. Skipping load step.")
             return
         
         try:
+            self.metrics.gauge(
+                "pipeline.load.rows",
+                record_count,
+                tags={
+                    "pipeline": "nse_daily_bhavcopy",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
+
             df.writeTo(self.table_name).overwrite(sf.expr("true"))
+            self.metrics.increment(
+                "pipeline.load.success",
+                tags={"pipeline": "nse_daily_bhavcopy"}
+            )
             self.logger.info(f"Successfully wrote {record_count:,} records")
+
         except Exception as e:
+            self.metrics.increment(
+                "pipeline.load.failure",
+                tags={"pipeline": "nse_daily_bhavcopy"}
+            )
             self.logger.error(f"Error writing to Iceberg table: {e}")
             raise
     
@@ -231,32 +337,70 @@ class NSEDailyData(PipelineBase):
     def run(self):
     
         ctx = self.create_execution_context()
-    
+        start_ts = time.time()
+
+        self.metrics.increment(
+            "pipeline.run.started",
+            tags={
+                "pipeline": "nse_daily_bhavcopy",
+                "layer": "bronze"
+            }
+        )
         self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
 
-        load_type = self.config.get("load_type", "full")
+        
         try:
+            load_type = self.config.get("load_type", "full")
             ctx.job_control.start_run(load_type=load_type)
             self.logger.info(f"Job started with run_id: {ctx.process.run_id}")
             self.pre_etl(ctx)
             df = self.extract()
             df = self.transform(df, ctx)
             self.load(df)
+
+            rows_written = safe_count(df) if isinstance(df, DataFrame) else 0
+
+            self.metrics.increment(
+                "pipeline.run.success",
+                tags={
+                    "pipeline": "nse_daily_bhavcopy",
+                    "layer": "bronze"
+                }
+            )
+
+            self.metrics.gauge(
+                "pipeline.table.rows",
+                rows_written,
+                tags={
+                    "pipeline": "nse_daily_bhavcopy",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
             self.post_etl(ctx)
 
             # Mark success
 
             max_ts = df.agg({"trade_date": "max"}).collect()[0][0] if isinstance(df, DataFrame) else None
-            rows_written = df.count() if isinstance(df, DataFrame) else None
+            
             ctx.job_control.mark_success(max_ts, rows_written)
 
             self.logger.info(f"Pipeline completed successfully. Rows written: {rows_written} ")
         except Exception as e:
             # Mark failure
-
+            self.metrics.increment(
+                "pipeline.run.failure",
+                tags={"pipeline": "nse_daily_bhavcopy", "layer": "bronze"}
+            )
             ctx.job_control.mark_failure(str(e))
-            self.logger.error(f"Pipeline failed: {e}")
             raise
+        finally:
+            self.metrics.timing(
+                "pipeline.run.duration_ms",
+                (time.time() - start_ts) * 1000,
+                tags={"pipeline": "nse_daily_bhavcopy", "layer": "bronze"}
+            )
+
 
 
 headers = {
@@ -279,8 +423,8 @@ def get_dates():
 
     return list_of_dates
 
-def fetch_data(url, output_path, logger):
-    
+def fetch_data(url, output_path, logger, metrics):
+    start_ts = time.time()
     try:
         session = requests.Session()
         retries = Retry(total=4, backoff_factor=1,
@@ -290,20 +434,44 @@ def fetch_data(url, output_path, logger):
         response = session.get(url, headers=headers, timeout=30)
         output_file_name = os.path.basename(url)
         if response.status_code == 404:
+            metrics.increment(
+                "pipeline.http.not_found",
+                tags={"pipeline": "nse_daily_bhavcopy", "file": output_file_name}
+            )
             logger.warning(f"File not found, {output_file_name}")
-        else:
-            response.raise_for_status()
-            #output_path = os.path.basename(url)
-            with gzip.GzipFile(output_path+ output_file_name + ".gz", "wb") as f:
-                f.write(response.content)
-        
-            logger.info(f"Downloaded successfully, {output_file_name}")
+            return
+        response.raise_for_status()
+        #output_path = os.path.basename(url)
+        with gzip.GzipFile(output_path+ output_file_name + ".gz", "wb") as f:
+            f.write(response.content)
+    
+        logger.info(f"Downloaded successfully, {output_file_name}")
+        metrics.increment(
+            "pipeline.http.success",
+            tags={"pipeline": "nse_daily_bhavcopy"}
+        )
         time.sleep(random.randint(2,4))
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP Error encountered: {str(e)}")
+        metrics.increment(
+            "pipeline.http.failure",
+            tags={"pipeline": "nse_daily_bhavcopy"}
+        )
         raise
     except requests.exceptions.RequestException as e:
         logger.error(f"Error encountered: {str(e)}")
+        metrics.increment(
+            "pipeline.http.failure",
+            tags={"pipeline": "nse_daily_bhavcopy"}
+        )
+        raise
+
+    finally:
+        metrics.timing(
+            "pipeline.http.duration_ms",
+            (time.time() - start_ts) * 1000,
+            tags={"pipeline": "nse_daily_bhavcopy"}
+        )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="NSE Daily Bhavcopy Pipeline")
