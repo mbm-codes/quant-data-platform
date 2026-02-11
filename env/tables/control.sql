@@ -20,3 +20,21 @@ CREATE TABLE IF NOT EXISTS local.control_db.job_state (
 )
 USING ICEBERG;
 
+
+CREATE TABLE IF NOT EXISTS local.control_db.metrics_events (
+    ts            TIMESTAMP COMMENT 'Event timestamp (UTC)',
+    metric_name   STRING    COMMENT 'Metric identifier, e.g. pipeline.table.rows',
+    metric_type   STRING    COMMENT 'counter | gauge | timing',
+    metric_value  DOUBLE    COMMENT 'Metric value',
+    pipeline      STRING    COMMENT 'Pipeline name',
+    table_name    STRING    COMMENT 'Logical table name (if applicable)',
+    layer         STRING    COMMENT 'bronze | silver | gold',
+    tags          MAP<STRING, STRING> COMMENT 'Free-form metric tags'
+)
+USING ICEBERG
+PARTITIONED BY (
+    days(ts),
+    pipeline
+);
+
+

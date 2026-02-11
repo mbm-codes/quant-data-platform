@@ -8,6 +8,7 @@ from datetime import date
 from core.context.process_context import create_process_context
 from pyspark.sql.types import StructType
 from pyspark.sql import DataFrame, functions as sf
+from core.metrics.spark import SparkMetricsEmitter
 
 def load_test_config():
     with open("tests/configs/test_nse_bhavcopy_daily_bronze_to_silver.yaml") as f:
@@ -45,13 +46,25 @@ def test_nse_bhavcopy_daily_end_to_end(spark):
         ) USING PARQUET
         PARTITIONED BY (trade_year);
     """
+    ENV = os.getenv("QDP_ENV", "local")
+    pipeline_type = "nse_bhavcopy_daily_bronze_to_silver_test"
+
+    metrics = SparkMetricsEmitter(
+            spark,
+            table_name="local.control_db.metrics_events",
+            default_tags={
+                "env": ENV,
+                "pipeline": pipeline_type
+            }
+    )
 
     logger = QDPLogger(name="test_logger")
 
     pipeline = NSEDailyBhavcopySilver(
         spark=spark,
         logger=logger,
-        config=config
+        config=config,
+        metrics=metrics
     )
 
     ctx = pipeline.create_execution_context()

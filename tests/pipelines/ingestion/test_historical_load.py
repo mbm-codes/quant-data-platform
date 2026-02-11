@@ -8,7 +8,9 @@ import yaml
 import gzip
 import shutil
 import pytest
-
+import os
+from core.metrics.spark import SparkMetricsEmitter
+from core.exceptions.errors import SchemaEnforcementError
 
 # spark fixture is defined in tests/conftest.py
 # never import a fixture directly; pytest handles it
@@ -16,7 +18,17 @@ import pytest
 def pipeline(spark):
     config = load_test_config()
     logger = QDPLogger(name="test_logger", level=QDPLogger.DEBUG)
-    return NSEHistoricalDataPipeline(spark, logger, config)
+    ENV = os.getenv("QDP_ENV", "local")
+    pipeline_type = "nse_historical_test"
+    metrics = SparkMetricsEmitter(
+            spark,
+            table_name="local.control_db.metrics_events",
+            default_tags={
+                "env": ENV,
+                "pipeline": pipeline_type
+            }
+    )
+    return NSEHistoricalDataPipeline(spark, logger, config, metrics)
 
 
 def load_test_config():
@@ -127,11 +139,11 @@ def test_extract_raises_on_schema_mismatch(pipeline, tmp_path):
 
     pipeline.config["input_pattern"] = str(file)+".gz"
     
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(SchemaEnforcementError) as excinfo:
         df = pipeline.extract()
     
     msg = str(excinfo.value)
-    assert "Extraction failed" in msg
+    assert "Raw input schema enforcement failed" in msg
 
 def test_normalize_column_names(pipeline, spark):
     input_data = [
