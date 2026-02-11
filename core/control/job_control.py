@@ -62,7 +62,7 @@ class JobControl:
             UPDATE local.control_db.job_run_audit
             SET status = 'FAILED',
                 end_time = current_timestamp(),
-                error_message = '{error_msg}'
+                error_message = '{str(error_msg)}'
             WHERE job_name = '{self.proc_ctx.process_name}'
                 AND run_id = '{self.run_id}'
         """)

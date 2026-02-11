@@ -30,17 +30,24 @@ schema:
   output:
     strict: true
 
-data_quality_checks:
-  raw_input:
-    no_nulls_except: []
-    positive_values: ["open", "close", "high", "low", "volume"]
-  output:
-    no_nulls_except: []
-    positive_values: ["open_price", "close_price", "high_price", "low_price", "volume_qty"]
-
 
 # Logging paths
 app_log_file: "./logs/local_job_nse_historical_load_app.log"
 spark_log_file: "./logs/local_job_nse_historical_load_spark.log"
 
 load_type: "full"
+
+
+data_quality:
+  file_checks:
+    - name: file_exists
+      enabled: true
+      severity: FAIL
+      action: BLOCK
+
+    - name: non_empty_file
+      enabled: true
+      min_rows: 1
+      severity: FAIL
+      action: BLOCK
+

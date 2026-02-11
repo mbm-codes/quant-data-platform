@@ -39,7 +39,7 @@ class QDPLogger:
         self.app_logger.propagate = False
 
         formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            "%(asctime)s | %(levelname)s | %(name)s | %(funcName)s | %(lineno)d | %(message)s",
             "%Y-%m-%d %H:%M:%S"
         )
 

@@ -2,7 +2,8 @@
 import os
 from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline
 from core.logging.logging import QDPLogger
-
+from core.metrics.spark import SparkMetricsEmitter
+from core.context.process_context import create_process_context
 
 def test_pipeline_end_to_end(spark, tmp_path):
     input_path = tmp_path / "input"
@@ -24,10 +25,10 @@ def test_pipeline_end_to_end(spark, tmp_path):
         "run_id": "1",
         "process_name": "test",
         "casts": {
-            "open": ("open_price", "double"),
-            "high": ("high_price", "double"),
-            "low": ("low_price", "double"),
-            "close": ("close_price", "double"),
+            "open": ("open_price", "DECIMAL(20,8)"),
+            "high": ("high_price", "DECIMAL(20,8)"),
+            "low": ("low_price", "DECIMAL(20,8)"),
+            "close": ("close_price", "DECIMAL(20,8)"),
             "volume": ("volume_qty", "long"),
         },
         "static_columns": {
@@ -44,13 +45,13 @@ def test_pipeline_end_to_end(spark, tmp_path):
         CREATE TABLE IF NOT EXISTS local.market_lakehouse.intgr_bronze_nse_historical_prices_raw (
         symbol STRING,
         trade_date DATE,
-        open_price DOUBLE,
-        high_price DOUBLE,
-        low_price DOUBLE,
-        close_price DOUBLE,
+        open_price DECIMAL(20,8),
+        high_price DECIMAL(20,8),
+        low_price DECIMAL(20,8),
+        close_price DECIMAL(20,8),
         volume_qty BIGINT,
-        dividends DOUBLE,
-        stock_splits DOUBLE,
+        dividends DECIMAL(20,8),
+        stock_splits DECIMAL(20,8),
         exchange STRING,
         data_src STRING,        
         source_file STRING,        
@@ -65,14 +66,39 @@ def test_pipeline_end_to_end(spark, tmp_path):
         ) USING PARQUET
         PARTITIONED BY (trade_year);
     """
+    ENV = os.getenv("QDP_ENV", "local")
+    pipeline_type = "nse_historical_test"
 
+    metrics = SparkMetricsEmitter(
+            spark,
+            table_name="local.control_db.metrics_events",
+            default_tags={
+                "env": ENV,
+                "pipeline": pipeline_type
+            }
+    )
     logger = QDPLogger(name="test_logger")
 
     pipeline = NSEHistoricalDataPipeline(
         spark=spark,
         logger=logger,
-        config=config
+        config=config,
+        metrics=metrics
     )
+
+    ctx = pipeline.create_execution_context()
+    proc_ctx = create_process_context(
+        pipeline_version="v1.0",
+        is_backfill=False,
+        process_id="int_test_nse_historical",
+        run_id="1",
+        process_name="int_test_nse_historical_bronze",
+        spark=spark,
+        force_new_run_id=False,
+        orchestrator_context=None
+    )
+
+    ctx.process = proc_ctx
     
     spark.sql(create_table_ddl)
     pipeline.run()

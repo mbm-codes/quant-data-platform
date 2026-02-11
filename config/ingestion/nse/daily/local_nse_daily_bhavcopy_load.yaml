@@ -36,17 +36,23 @@ schema:
   output:
     strict: true
 
-data_quality_checks:
-  raw_input:
-    no_nulls_except: []
-    positive_values: ["prev_close", "open_price", "high_price", "low_price", "last_price", "close_price", "avg_price", "ttl_trd_qnty", "turnover_lacs", "no_of_trades", deliv_qty, deliv_per]
-  output:
-    no_nulls_except: []
-    positive_values: ["prev_close", "open_price", "high_price", "low_price", "last_price", "close_price", "avg_price", "ttl_trd_qnty", "turnover_lacs", "no_of_trades", deliv_qty, deliv_per]
-
 # Static columns added to all rows
 static_columns:
   exchange: NSE
   data_src: nse_bhavcopy
 
 load_type: "full"
+
+data_quality:
+
+  file_checks:
+    - name: file_exists
+      enabled: true
+      severity: FAIL
+      action: BLOCK
+
+    - name: non_empty_file
+      enabled: true
+      min_rows: 1
+      severity: FAIL
+      action: BLOCK

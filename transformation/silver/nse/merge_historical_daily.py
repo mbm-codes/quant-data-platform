@@ -1,4 +1,5 @@
 import argparse
+import time
 from core.pipeline.transformation_base import SilverPipelineBase
 from core.pipeline.transformation_factory import TransformationPipelineFactory
 from pyspark.sql import DataFrame, functions as sf
@@ -13,13 +14,27 @@ import os
 import copy
 from pyspark.sql.window import Window
 from functools import reduce
+from core.exceptions.exceptions import (
+    PipelineException,
+    TransformationException,
+)
 
+from core.exceptions.errors import (
+    InputDataError,
+    PipelineError,
+    LoadError,
+)
+
+
+pipeline_name = "nse_equity_silver"
+layer = "silver"
 
 class NSEEquityDataSilver(SilverPipelineBase):
-    def __init__(self, spark, logger, config):
+    def __init__(self, spark, logger, config, metrics):
         self.spark = spark
         self.logger = logger
         self.config = config
+        self.metrics = metrics
         self.input_table_names = config["input_tables"]
         self.output_table_name = config["output_table"]
 
@@ -33,73 +48,183 @@ class NSEEquityDataSilver(SilverPipelineBase):
 
     def extract(self) -> Union[DataFrame, dict]:
         try:
-        
-            self.logger.info(f"Reading {''.join(self.config['input_tables'].values())} silver layer tables")
+            self.logger.info(
+                f"Reading {''.join(self.config['input_tables'].values())} silver layer tables"
+            )
             df_or_dfs = self.read_silver()
-            
+            if isinstance(df_or_dfs, DataFrame):
+                rows = safe_count(df_or_dfs, logger=self.logger)
+                self.metrics.gauge(
+                    "pipeline.extract.rows",
+                    rows,
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer,
+                        "table": "input"
+                    }
+                )
+            else:
+                for tbl, df in df_or_dfs.items():
+                    rows = safe_count(df, logger=self.logger)
+                    self.metrics.gauge(
+                        "pipeline.extract.rows",
+                        rows,
+                        tags={
+                            "pipeline": pipeline_name,
+                            "layer": layer,
+                            "table": tbl
+                        }
+                    )
             return df_or_dfs
-
+        
         except Exception as e:
-            self.logger.error(f"Failed to read {''.join(self.config['input_tables'].values())} silver layer tables")
-            raise ValueError("Failed to read") from e
+            self.logger.exception("Failed to read silver layer input tables")
+            raise InputDataError(
+                "Failed to read silver layer input tables"
+            ) from e
 
     def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
-            self.logger.info(f"Starting transformations on {''.join(self.config['input_tables'].values())}")
-            input_df_dict = df_or_dfs
+            self.logger.info(
+                f"Starting transformations on {''.join(self.config['input_tables'].values())}"
+            )
 
-            for tbl_name, tbl_df in input_df_dict.items():
-                input_df_dict = { k: v.drop("source_file","ingestion_ts", "execution_date", "run_id", "job_name", "process_id", "pipeline_version", "is_backfill", "trade_year") for k, v in input_df_dict.items() }
+            if not isinstance(df_or_dfs, dict) or not df_or_dfs:
+                raise InputDataError(
+                    "Equity silver transform expects a non-empty dict of DataFrames"
+                )
 
-            input_df_dict["slvr_nse_historical"] = input_df_dict["slvr_nse_historical"].withColumnRenamed("volume_qty", "ttl_trd_qnty")
-            
-            input_df_dict["slvr_nse_historical"] = input_df_dict["slvr_nse_historical"].withColumn("symbol", sf.regexp_replace("symbol", r"\.NS$", "" ))
+            try:
+                cleaned_inputs = {
+                    k: v.drop(
+                        "source_file",
+                        "ingestion_ts",
+                        "execution_date",
+                        "run_id",
+                        "job_name",
+                        "process_id",
+                        "pipeline_version",
+                        "is_backfill",
+                        "trade_year",
+                    )
+                    for k, v in df_or_dfs.items()
+                }
 
-            merged_nse_historic_daily_df = reduce(lambda d1, d2: d1.unionByName(d2, allowMissingColumns=True), input_df_dict.values())
-            merged_nse_historic_daily_df = self.apply_business_rules(merged_nse_historic_daily_df)
-            merged_nse_historic_daily_df = self._add_metadata(merged_nse_historic_daily_df, ctx)
-            self.logger.debug(f"Transformed schema: {merged_nse_historic_daily_df.schema.simpleString()}")
-            
-            return merged_nse_historic_daily_df
-        except Exception as e:
-            self.logger.error(f"Error transforming NSE Equity silver layer: {e}")
+                cleaned_inputs["slvr_nse_historical"] = (
+                    cleaned_inputs["slvr_nse_historical"]
+                    .withColumnRenamed("volume_qty", "ttl_trd_qnty")
+                    .withColumn(
+                        "symbol",
+                        sf.regexp_replace("symbol", r"\.NS$", "")
+                    )
+                )
+
+                merged_df = reduce(
+                    lambda d1, d2: d1.unionByName(d2, allowMissingColumns=True),
+                    cleaned_inputs.values(),
+                )
+
+            except Exception as e:
+                raise TransformationException(
+                    "Failed during equity input normalization or merge"
+                ) from e
+
+            merged_df = self.apply_business_rules(merged_df)
+            merged_df = self._add_metadata(merged_df, ctx)
+
+            row_count = safe_count(merged_df)
+            self.metrics.gauge(
+                    "pipeline.transform.rows",
+                    row_count,
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer
+                    }
+                )
+
+            self.logger.debug(
+                f"Transformed schema: {merged_df.schema.simpleString()}"
+            )
+
+            return merged_df
+
+        except PipelineError:
+            self.logger.exception("Equity silver transform failed due to domain error")
             raise
+
+        except PipelineException as e:
+            self.logger.exception("Internal equity silver transform failure")
+            raise PipelineError(
+                "Equity silver transform failed"
+            ) from e
     
     
     def load(self, df):
-
         record_count = safe_count(df, logger=self.logger)
-        self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.output_table_name}")
 
-        if record_count is None or record_count == 0:
-            self.logger.warning("No records to write. Skipping load step.")
+        if not record_count:
+            self.logger.warning("No records to write. Skipping load.")
             return
 
         try:
             df.writeTo(self.output_table_name).overwrite(sf.expr("true"))
-            self.logger.info(f"Successfully wrote {record_count:,} records")
+
+            self.metrics.gauge(
+                    "pipeline.load.rows",
+                    record_count,
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer,
+                        "table": self.output_table_name
+                    }
+            )
+            self.logger.info(f"Wrote {record_count:,} records")
         except Exception as e:
-            self.logger.error(f"Error writing to Iceberg table: {e}")
-            raise
+            self.logger.exception(
+                f"Failed writing equity silver data to {self.output_table_name}"
+            )
+            raise LoadError(
+                f"Failed to write equity silver data to {self.output_table_name}"
+            ) from e
+
     
     def read_silver(self) -> Union[DataFrame, dict]:
         df_map = {}
-        for tbl_typ, tbl_name in self.config["input_tables"].items():
-            if tbl_typ == "slvr_nse_bhavcopy_daily":
-                df_map[tbl_typ] = self.spark.read.table(tbl_name).filter("series = 'EQ'").drop("series")
-            else:
-                df_map[tbl_typ] = self.spark.read.table(tbl_name)
+        try:
+            for tbl_typ, tbl_name in self.config["input_tables"].items():
+                if tbl_typ == "slvr_nse_bhavcopy_daily":
+                    df_map[tbl_typ] = (
+                        self.spark.read.table(tbl_name)
+                        .filter("series = 'EQ'")
+                        .drop("series")
+                    )
+                else:
+                    df_map[tbl_typ] = self.spark.read.table(tbl_name)
+        except Exception as e:
+            raise PipelineException(
+                "Failed while reading silver tables for equity merge"
+            ) from e
 
         return df_map
+
     
     def apply_business_rules(self, df: DataFrame) -> DataFrame:
+        try:
+            self.logger.info(
+                f"Record count before deduping: {safe_count(df)}"
+            )
 
-        self.logger.info(f"Record count before deduping, {safe_count(df)}")
+            df_clean = df.dropDuplicates(["symbol", "trade_date"])
 
-        df_clean = df.dropDuplicates(["symbol", "trade_date"])
-        self.logger.info(f"Record count after deduping, {safe_count(df_clean)}")
-       
-        return df_clean
+            self.logger.info(
+                f"Record count after deduping: {safe_count(df_clean)}"
+            )
+            return df_clean
+
+        except Exception as e:
+            raise TransformationException(
+                "Failed while applying equity silver business rules"
+            ) from e
 
     def _add_metadata(self, df, ctx):
         # Metadata enrichment
@@ -132,34 +257,82 @@ class NSEEquityDataSilver(SilverPipelineBase):
         return super().create_execution_context()
     
     def run(self):
-    
+        start_ts = time.time()
         ctx = self.create_execution_context()
-    
         self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
+        self.metrics.increment(
+            "pipeline.run.started",
+            tags={
+                "pipeline": pipeline_name,
+                "layer": layer
+            }
+        )
 
         load_type = self.config.get("load_type", "full")
+
         try:
             ctx.job_control.start_run(load_type=load_type)
-            self.logger.info(f"Job started with run_id: {ctx.process.run_id}")
             self.pre_etl(ctx)
             df = self.extract()
             df = self.transform(df, ctx)
             self.load(df)
             self.post_etl(ctx)
 
-            # Mark success
+            max_ts = df.agg({"trade_date": "max"}).collect()[0][0]
+            rows_written = df.count()
 
-            max_ts = df.agg({"trade_date": "max"}).collect()[0][0] if isinstance(df, DataFrame) else None
-            rows_written = df.count() if isinstance(df, DataFrame) else None
             ctx.job_control.mark_success(max_ts, rows_written)
+            self.logger.info(
+                f"Equity silver pipeline completed. Rows written: {rows_written}"
+            )
 
-            self.logger.info(f"Pipeline completed successfully. Rows written: {rows_written} ")
-        except Exception as e:
-            # Mark failure
+            self.metrics.increment(
+                "pipeline.run.success",
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer
+                    }
+                )
+
+        except PipelineError as e:
+            self.metrics.increment(
+                "pipeline.run.failure",
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer
+                    }
+            )
+
 
             ctx.job_control.mark_failure(str(e))
-            self.logger.error(f"Pipeline failed: {e}")
+            self.logger.exception(
+                "Equity silver pipeline failed due to domain error"
+            )
             raise
+
+        except Exception:
+            self.metrics.increment(
+                "pipeline.run.failure",
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer
+                    }
+            )
+
+            ctx.job_control.mark_failure("Unexpected equity silver pipeline failure")
+            self.logger.exception("Unexpected failure")
+            raise
+        finally:
+            self.metrics.gauge(
+                "pipeline.run.duration_ms",
+                (time.time() - start_ts) * 1000,
+                    tags={
+                        "pipeline": pipeline_name,
+                        "layer": layer,
+                        "table": self.output_table_name
+                    }
+                )
+
 
 
 def parse_args():

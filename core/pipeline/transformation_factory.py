@@ -1,4 +1,6 @@
 from core.pipeline.base import PipelineBase
+from core.metrics.spark import SparkMetricsEmitter
+import os
 
 class TransformationPipelineFactory:
     """
@@ -13,10 +15,20 @@ class TransformationPipelineFactory:
 
     @staticmethod
     def get_pipeline(pipeline_type: str, spark, logger, config) -> PipelineBase:
+
+        ENV = os.getenv("QDP_ENV", "local")
+        metrics = SparkMetricsEmitter(
+                spark,
+                table_name="local.control_db.metrics_events",
+                default_tags={
+                    "env": ENV,
+                    "pipeline": pipeline_type
+                }
+        )
         if pipeline_type not in TransformationPipelineFactory._pipeline_registry:
             raise ValueError(f"Unsupported transformation pipeline type: {pipeline_type}")
         
         module_path, class_name = TransformationPipelineFactory._pipeline_registry[pipeline_type].split(":")
         module = __import__(module_path, fromlist=[class_name])
         pipeline_class = getattr(module, class_name)
-        return pipeline_class(spark, logger, config)
+        return pipeline_class(spark, logger, config, metrics)

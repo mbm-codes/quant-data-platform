@@ -8,6 +8,7 @@
 # Note - The source data is entire NSE historical data until 2023-10-31  
 
 import os
+from time import time
 import yaml
 import argparse
 from dataclasses import dataclass
@@ -25,7 +26,14 @@ from core.config.loader import load_config
 from core.spark_dataframe.transforms import normalize_column_names, trim_and_nullify_strings
 from core.spark_dataframe.actions import safe_count
 from core.spark_dataframe.schema import enforce_schema
-    
+from core.quality.runner import DataQualityRunner
+from core.quality.factory.file_checks import build_file_checks
+from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.table_checks import build_table_checks
+from core.quality.actions import apply_actions
+from core.exceptions.exceptions import DQExecutionException, PipelineException, TransformationException
+from core.exceptions.errors import InputDataError, DataQualityError, SchemaEnforcementError, PipelineError, LoadError, PostETLError
+
 # ==========================
 # Schemas and DDLs
 # ==========================
@@ -69,13 +77,13 @@ create_table_ddl = """
         CREATE TABLE IF NOT EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw (
             symbol STRING,
             trade_date DATE,
-            open_price DOUBLE,
-            high_price DOUBLE,
-            low_price DOUBLE,
-            close_price DOUBLE,
+            open_price DECIMAL(20,8),
+            high_price DECIMAL(20,8),
+            low_price DECIMAL(20,8),
+            close_price DECIMAL(20,8),
             volume_qty BIGINT,
-            dividends DOUBLE,
-            stock_splits DOUBLE,
+            dividends DECIMAL(20,8),
+            stock_splits DECIMAL(20,8),
             exchange STRING,
             data_src STRING,        
             source_file STRING,        
@@ -91,14 +99,17 @@ create_table_ddl = """
         PARTITIONED BY (trade_year);
     """
 
+pipeline_name = "nse_historical"
+layer = "bronze"
 # ==========================
 # Historical Data Pipeline
 # ==========================
 class NSEHistoricalDataPipeline(PipelineBase):
-    def __init__(self, spark, logger, config):
+    def __init__(self, spark, logger, config, metrics):
         self.spark = spark
         self.logger = logger
         self.config = config
+        self.metrics = metrics
         self.table_name = config["output_table"]
         self.raw_schema_strict = config["schema"]["raw"]["strict"]
         self.output_schema_strict = config["schema"]["output"]["strict"]
@@ -108,8 +119,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
     # --------------------------
     def pre_etl(self, ctx):
         self.logger.info("Running pre-etl steps for NSE Historical Data Pipeline")
-        self.spark.sql("DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw")  
-        self.spark.sql(create_table_ddl)
+        #self.spark.sql("DROP TABLE IF EXISTS local.market_lakehouse.bronze_nse_historical_prices_raw")  
+        #self.spark.sql(create_table_ddl)
     
     def post_etl(self, ctx):
         self.logger.info("Running post-etl steps for NSE Historical Data Pipeline")
@@ -118,98 +129,278 @@ class NSEHistoricalDataPipeline(PipelineBase):
     def extract(self):
         try:
             self.logger.info(f"Reading historical files from {self.config['input_pattern']}")
+            start_ts = time()
+        
+            dq_cfg = self.config.get("data_quality") or {}
+            file_checks_cfg = dq_cfg.get("file_checks", [])
+
+            file_checks = build_file_checks(
+                self.spark,
+                file_checks_cfg,
+                self.config["input_pattern"]
+            )
+
+            try:
+                runner = DataQualityRunner(file_checks, self.logger)
+                results = runner.run()
+            except Exception as e:
+                raise DQExecutionException("File-level DQ execution failed") from e
+
+            failed = [r for r in results if r.status.value == "FAIL"]
+            if failed:
+                raise DataQualityError(
+                    "File-level data quality checks failed",
+                    failed_checks=failed
+                )
+
             df = self.spark.read.options(header=True).csv(self.config["input_pattern"])
-            self.logger.debug(f"Input schema: {df.schema.simpleString()}")
-          
+            row_count = safe_count(df, logger=self.logger)
+
+            self.metrics.gauge(
+                "pipeline.extract.rows",
+                row_count,
+                tags={
+                    "pipeline": "nse_historical",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
+
             df = normalize_column_names(df)
             df = trim_and_nullify_strings(df)
-            df, missing_cols_added = enforce_schema(df, RAW_INPUT_SCHEMA, logger=self.logger, strict=self.raw_schema_strict, stage="raw_input")
-            # --------------------------
-            # Data Quality Checks
-            # --------------------------
-            dq = DataQualityChecks(logger=self.logger)
-            dq.assert_no_nulls(df, [c for c in df.columns if c not in missing_cols_added ])
-            dq.assert_positive_values(df, self.config.get("data_quality_checks", {}).get("raw_input", {}).get("positive_values", []))
-            self.logger.info(f"Data quality metrics: {dq.metrics} ")
+
+            try:
+                df, _ = enforce_schema(
+                    df,
+                    RAW_INPUT_SCHEMA,
+                    logger=self.logger,
+                    strict=self.raw_schema_strict,
+                    stage="raw_input",
+                )
+            except Exception as e:
+                raise SchemaEnforcementError("Raw input schema enforcement failed") from e
 
             return df
-        except Exception as e:
-            self.logger.error(f"Failed to extract historical data: {e}")
-            raise ValueError("Extraction failed") from e
+
+        except PipelineError:
+            self.logger.exception("Extraction failed due to domain error")
+            raise
+
+        except PipelineException as e:
+            self.logger.exception("Internal extraction failure")
+            raise InputDataError("Failed to extract historical data") from e
+
        
 
     def transform(self, df_or_dfs, ctx) -> DataFrame:
         try:
-            self.logger.info("Starting transformations on historical data")
-            if isinstance(df_or_dfs, DataFrame):
-                df = df_or_dfs
-            elif isinstance(df_or_dfs, dict):
-                df = next(iter(df_or_dfs.values()))
-            else:
-                raise ValueError("df_or_dfs must be a DataFrame or dict")
+            self.logger.info("Starting transformations")
 
-            df = self._derive_business_fields(df)
-            
-            df = self._add_metadata(df, ctx)
+            df = self._extract_df(df_or_dfs)
 
-            df, _ = enforce_schema(df, EXPECTED_OUTPUT_SCHEMA, logger=self.logger, strict=self.output_schema_strict, stage="output")
+            dq_cfg = self.config.get("data_quality") or {}
+            col_checks = build_column_checks(df, dq_cfg.get("column_checks", []))
+            tbl_checks = build_table_checks(df, dq_cfg.get("table_checks", []))
 
-           
-            self.logger.debug(f"Transformed schema: {df.schema.simpleString()}")
-            return df
-        except Exception as e:
-            self.logger.error(f"Error transforming historical data: {e}")
+            results = []
+            checks = col_checks + tbl_checks
+
+            if checks:
+                try:
+                    runner = DataQualityRunner(checks, self.logger)
+                    results = runner.run()
+                except Exception as e:
+                    raise DQExecutionException("Column/Table DQ execution failed") from e
+
+                self.metrics.gauge(
+                    "pipeline.dq.checks.total",
+                    len(results),
+                    tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+                )
+
+                failed = [r for r in results if r.status.value == "FAIL"]
+
+                self.metrics.gauge(
+                    "pipeline.dq.checks.failed",
+                    len(failed),
+                    tags={"pipeline": "nse_daily_bhavcopy", "stage": "file"}
+                )
+
+                if failed:
+                    self.metrics.increment(
+                        "pipeline.dq.failure",
+                        tags={"pipeline": pipeline_name, "layer": layer}
+                    )
+                    raise DataQualityError(
+                        "Transform-stage data quality checks failed",
+                        failed_checks=failed
+                    )
+
+            try:
+                updt_df = apply_actions(self.spark, ctx, df, results)
+            except Exception as e:
+                raise TransformationException("Failed to apply DQ actions") from e
+
+            res_df = updt_df or df
+            res_df = self._derive_business_fields(res_df)
+            res_df = self._add_metadata(res_df, ctx)
+
+            try:
+                res_df, _ = enforce_schema(
+                    res_df,
+                    EXPECTED_OUTPUT_SCHEMA,
+                    logger=self.logger,
+                    strict=self.output_schema_strict,
+                    stage="output",
+                )
+            except Exception as e:
+                raise SchemaEnforcementError("Output schema enforcement failed") from e
+
+            row_count = safe_count(res_df, self.logger)
+            self.metrics.gauge(
+                "pipeline.transform.rows",
+                row_count,
+                tags={
+                    "pipeline": "nse_historical",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
+
+            return res_df
+
+        except PipelineError:
+            self.logger.exception("Transform failed due to domain error")
             raise
-        
 
+        except PipelineException as e:
+            self.logger.exception("Internal transform failure")
+            raise PipelineError("Transform step failed") from e
+        
     def load(self, df):
         record_count = safe_count(df, logger=self.logger)
-        self.logger.info(f"Writing {record_count:,} records to Iceberg table {self.table_name}")
 
-        if record_count is None or record_count == 0:
-            self.logger.warning("No records to write. Skipping load step.")
+        self.metrics.gauge(
+            "pipeline.load.rows",
+            record_count,
+            tags={
+                "pipeline": "nse_historical",
+                "layer": "bronze",
+                "table": self.table_name
+            }
+        )
+        if not record_count:
+            self.logger.warning("No records to write. Skipping load.")
+            self.metrics.increment(
+                "pipeline.load.skipped",
+                tags={
+                    "pipeline": "nse_historical",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
             return
-        
+
         try:
             df.writeTo(self.table_name).overwrite(sf.expr("true"))
-            self.logger.info(f"Successfully wrote {record_count:,} records")
+            self.logger.info(f"Wrote {record_count:,} records")
+            self.metrics.increment(
+                "pipeline.load.success",
+                tags={
+                    "pipeline": "nse_historical",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
         except Exception as e:
-            self.logger.error(f"Error writing to Iceberg table: {e}")
-            raise
+            self.metrics.increment(
+                "pipeline.load.failure",
+                tags={
+                    "pipeline": "nse_historical",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
+            raise LoadError(
+                f"Failed to write data to Iceberg table {self.table_name}"
+            ) from e
     
     def create_execution_context(self):
         return super().create_execution_context()
 
     def run(self):
-    
         ctx = self.create_execution_context()
-    
-        self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
+        start_ts = time()
 
+        self.logger.info(f"Execution Context: {process_context_to_string(ctx.process)}")
         load_type = self.config.get("load_type", "full")
         try:
+            self.metrics.increment(
+                "pipeline.run.started",
+                tags={"pipeline": "nse_historical", "layer": "bronze"}
+            )
             ctx.job_control.start_run(load_type=load_type)
-            self.logger.info(f"Job started with run_id: {ctx.process.run_id}")
+
             self.pre_etl(ctx)
             df = self.extract()
             df = self.transform(df, ctx)
             self.load(df)
             self.post_etl(ctx)
 
-            # Mark success
+            rows_written = df.count()
 
-            max_ts = df.agg({"trade_date": "max"}).collect()[0][0] if isinstance(df, DataFrame) else None
-            rows_written = df.count() if isinstance(df, DataFrame) else None
+            self.metrics.increment(
+                "pipeline.run.success",
+                tags={"pipeline": "nse_historical", "layer": "bronze"}
+            )
+
+            self.metrics.gauge(
+                "pipeline.table.rows",
+                rows_written,
+                tags={
+                    "pipeline": "nse_historical",
+                    "layer": "bronze",
+                    "table": self.table_name
+                }
+            )
+            max_ts = df.agg({"trade_date": "max"}).collect()[0][0]
             ctx.job_control.mark_success(max_ts, rows_written)
 
-            self.logger.info(f"Pipeline completed successfully. Rows written: {rows_written} ")
-        except Exception as e:
-            # Mark failure
-
-            ctx.job_control.mark_failure(str(e))
-            self.logger.error(f"Pipeline failed: {e}")
+        except PipelineError:
+            self.metrics.increment(
+                "pipeline.run.failure",
+                tags={"pipeline": "nse_historical", "layer": "bronze", "type": "domain"}
+            )
             raise
-        
+
+        except Exception:
+            self.metrics.increment(
+                "pipeline.run.failure",
+                tags={"pipeline": "nse_historical", "layer": "bronze", "type": "unexpected"}
+            )
+            raise
+
+        finally:
+            self.metrics.timing(
+                "pipeline.run.duration_ms",
+                (time() - start_ts) * 1000,
+                tags={"pipeline": "nse_historical", "layer": "bronze"}
+            )
+
+    def _extract_df(self, df_or_dfs) -> DataFrame:
+        if isinstance(df_or_dfs, DataFrame):
+            return df_or_dfs
+
+        if isinstance(df_or_dfs, dict):
+            if not df_or_dfs:
+                raise InputDataError("df_or_dfs dict is empty")
+            return next(iter(df_or_dfs.values()))
+
+        raise InputDataError(
+            "df_or_dfs must be a DataFrame or dict[str, DataFrame]"
+        )
+
+
 
     def _derive_business_fields(self, df):
         # Extract symbol from filename
@@ -228,8 +419,8 @@ class NSEHistoricalDataPipeline(PipelineBase):
             if src_col in df.columns:
                 df = df.withColumn(dst_col, sf.col(src_col).cast(dtype)).drop(src_col)
 
-        df = df.withColumn("dividends", sf.col("dividends").cast("double"))
-        df = df.withColumn("stock_splits", sf.col("stock_splits").cast("double"))
+        df = df.withColumn("dividends", sf.col("dividends").cast("decimal(20,8)"))
+        df = df.withColumn("stock_splits", sf.col("stock_splits").cast("decimal(20,8)"))
 
         # Add static columns
         for col, val in self.config.get("static_columns", {}).items():
@@ -264,11 +455,6 @@ class NSEHistoricalDataPipeline(PipelineBase):
             one_hour_ago = ctx.process.process_timestamp - timedelta(days=1)
             timestamp_str = one_hour_ago.strftime("%Y-%m-%d %H:%M:%S")
 
-            # self.spark.table(self.table_name).remove_orphan_files() \
-            # .older_than(one_hour_ago) \
-            # .execute()
-
-
             self.spark.sql(f"""
                 CALL local.system.expire_snapshots(
                     table => '{self.table_name}',
@@ -285,7 +471,7 @@ class NSEHistoricalDataPipeline(PipelineBase):
             """)
         except Exception as e:
             self.logger.error(f"Error during post-etl cleanup: {e}")
-            raise e
+            raise PostETLError("Post-ETL Iceberg cleanup failed")
 
 @dataclass(frozen=True)
 class PipelineArgs:
