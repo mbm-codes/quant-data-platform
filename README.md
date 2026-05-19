@@ -52,7 +52,6 @@ This project intentionally does **NOT**:
 - **Hiring Managers / Interviewers** – system design depth & tradeoff clarity  
 
 ---
-<!--
 ## 🏗️ High-Level Architecture
 
 ```text
@@ -84,4 +83,4 @@ This project intentionally does **NOT**:
          +-----------------v------------------+
          | Features | Backtests | ML | AI     |
          +------------------------------------+
--->
+
