@@ -18,6 +18,18 @@ This project is designed as **data and research infrastructure**, not a trading 
 
 ---
 
+## 📍 Current Status
+
+✅ NSE historical OHLCV data ingestion — complete  
+✅ Daily incremental data pipeline — complete  
+🔄 Bronze/Silver lakehouse layers (Iceberg) — in progress  
+🔄 Transformation pipeline — in progress  
+⬜ Trino analytics layer — planned  
+⬜ Feature engineering — planned  
+⬜ Backtesting framework — planned  
+
+---
+
 ## 🎯 Project Goals
 
 This platform aims to:
