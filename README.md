@@ -1,4 +1,4 @@
-# 📊 NSE Quant Research & AI-Native Data Platform
+# 📊 NSE Quant Data Platform — Lakehouse Architecture
 
 A **quant-grade, research-first data platform** for Indian equity markets built on a **modern lakehouse architecture**, with a strong emphasis on **data correctness, reproducibility, and explainability**.
 
