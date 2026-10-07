@@ -1,0 +1,5 @@
+exchange,symbol,trade_date,open_price,high_price,low_price,close_price,volume_qty,currency,price_basis,source_name,source_file,source_hash,ingested_at,run_id,dataset_version
+NSE,RELIANCE,2026-09-21,1400.00,1425.00,1390.00,1415.00,1000000,INR,raw,sample,daily_prices.csv,,2026-09-21T18:00:00+00:00,sample-v0,v0
+NSE,RELIANCE,2026-09-22,1415.00,1430.00,1405.00,1422.00,1100000,INR,raw,sample,daily_prices.csv,,2026-09-22T18:00:00+00:00,sample-v0,v0
+NSE,TCS,2026-09-21,3200.00,3250.00,3180.00,3235.00,750000,INR,raw,sample,daily_prices.csv,,2026-09-21T18:00:00+00:00,sample-v0,v0
+NSE,TCS,2026-09-22,3235.00,3265.00,3220.00,3250.00,800000,INR,raw,sample,daily_prices.csv,,2026-09-22T18:00:00+00:00,sample-v0,v0

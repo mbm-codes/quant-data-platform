@@ -1,5 +1,4 @@
 import pytest
-from lakehouse.iceberg.spark_session import SparkSessionBuilder
 
 warehouse_path = "./warehouse"
 catalog_name = "local"
@@ -9,6 +8,14 @@ def spark():
     """
     Pytest fixture to create a SparkSession for testing.
     """
+
+    pytest.importorskip(
+        "pyspark",
+        reason="Legacy Spark tests require the optional PySpark environment.",
+    )
+
+    from lakehouse.iceberg.spark_session import SparkSessionBuilder
+    
     spark = SparkSessionBuilder(
         app_name="qdp-test-session",
         environment="local",
