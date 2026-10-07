@@ -142,7 +142,9 @@ celerybeat.pid
 .env
 .envrc
 .venv
-
+__pycache__/
+.pytest_cache/
+.ruff_cache/
 venv/
 
 env.bak/
@@ -209,3 +211,13 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+#parquet
+._SUCCESS*
+_SUCCESS*
+.part*
+part-*
+
+# Generated local data
+data/
+warehouse/
