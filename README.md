@@ -1,4 +1,4 @@
-# 📊 NSE Quant Research & AI-Native Data Platform
+# 📊 NSE Quant Data Platform — Lakehouse Architecture
 
 A **quant-grade, research-first data platform** for Indian equity markets built on a **modern lakehouse architecture**, with a strong emphasis on **data correctness, reproducibility, and explainability**.
 
@@ -15,6 +15,18 @@ This project is designed as **data and research infrastructure**, not a trading 
 - 🤖 **AI / LLM-assisted research workflows** (assistive, not predictive)
 - 💰 **Cost-efficient** and cloud-portable (DigitalOcean)
 - 🧱 Built with **open-source–first principles**
+
+---
+
+## 📍 Current Status
+
+✅ NSE historical OHLCV data ingestion — complete  
+✅ Daily incremental data pipeline — complete  
+🔄 Bronze/Silver lakehouse layers (Iceberg) — in progress  
+🔄 Transformation pipeline — in progress  
+⬜ Trino analytics layer — planned  
+⬜ Feature engineering — planned  
+⬜ Backtesting framework — planned  
 
 ---
 
@@ -52,7 +64,6 @@ This project intentionally does **NOT**:
 - **Hiring Managers / Interviewers** – system design depth & tradeoff clarity  
 
 ---
-<!--
 ## 🏗️ High-Level Architecture
 
 ```text
@@ -130,3 +141,4 @@ CSV → schema validation → partitioned Parquet → DuckDB → CLI query
 ### Scope Note
 
 The existing Spark-based ingestion, Iceberg setup, and Spark test suite are preserved as legacy and future scale-out work. They are not required for the V0 local workflow.
+
