@@ -1,14 +1,16 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+
+import pyarrow.parquet as pq
 import pytest
 from pydantic import ValidationError
-import pyarrow.parquet as pq
 
-from core.models.daily_prices import DailyPrice
 from core.data.daily_prices import load_daily_prices_csv
-from core.data.parquet import write_daily_prices_parquet
 from core.data.duckdb import connect, register_daily_prices_view
+from core.data.parquet import write_daily_prices_parquet
+from core.models.daily_prices import DailyPrice
+
 
 def valid_record() -> dict:
     return {
@@ -22,7 +24,7 @@ def valid_record() -> dict:
         "volume_qty": 1_000_000,
         "source_name": "sample",
         "source_file": "prices.csv",
-        "ingested_at": datetime.now(timezone.utc),
+        "ingested_at": datetime.now(UTC),
         "run_id": "test-run",
         "dataset_version": "v0",
     }
@@ -97,8 +99,8 @@ def test_queries_parquet_data_with_duckdb(tmp_path: Path) -> None:
     connection.close()
 
     assert rows == [
-        ("RELIANCE", Decimal(1415.00000000), 2026),
-        ("RELIANCE", Decimal(1422.00000000), 2026),
-        ("TCS", Decimal(3235.00000000), 2026),
-        ("TCS", Decimal(3250.00000000), 2026),
+        ("RELIANCE", Decimal("1415.00000000"), 2026),
+        ("RELIANCE", Decimal("1422.00000000"), 2026),
+        ("TCS", Decimal("3235.00000000"), 2026),
+        ("TCS", Decimal("3250.00000000"), 2026),
     ]

@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+
 class DailyPrice(BaseModel):
     """One canonical raw daily NSE equity price record."""
 

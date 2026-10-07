@@ -1,5 +1,6 @@
 from core.config.settings import Settings
 
+
 def test_default_settings_are_local() -> None:
     settings = Settings()
 
