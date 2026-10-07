@@ -85,3 +85,48 @@ This project intentionally does **NOT**:
          | Features | Backtests | ML | AI     |
          +------------------------------------+
 -->
+
+
+## V0 Local Quickstart
+
+V0 is laptop-first. It uses Python, Parquet, and DuckDB; it does not require Spark, Iceberg, or Trino.
+
+### Setup
+
+Install the project dependencies:
+
+```bash
+uv sync
+```
+
+### Load the sample dataset
+
+Validate the included daily-price CSV and write canonical, year-partitioned Parquet data:
+
+```bash
+uv run python -m core.cli load-csv tests/fixtures/v0/daily_prices.csv
+```
+
+### Query canonical prices
+
+Query the local Parquet dataset through DuckDB:
+
+```bash
+uv run python -m core.cli query --symbol RELIANCE
+```
+
+### Run V0 tests
+
+```bash
+uv run pytest tests/v0 -q
+```
+
+### V0 Data Flow
+
+```text
+CSV → schema validation → partitioned Parquet → DuckDB → CLI query
+```
+
+### Scope Note
+
+The existing Spark-based ingestion, Iceberg setup, and Spark test suite are preserved as legacy and future scale-out work. They are not required for the V0 local workflow.
