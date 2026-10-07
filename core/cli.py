@@ -1,7 +1,9 @@
 from pathlib import Path
+from typing import Annotated
 
-import typer
 import duckdb
+import typer
+
 from core.config.settings import get_settings
 from core.data.daily_prices import load_daily_prices_csv
 from core.data.duckdb import connect, register_daily_prices_view
@@ -11,7 +13,7 @@ app = typer.Typer(no_args_is_help=True)
 
 @app.command("load-csv")
 def load_csv(
-    source: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
 ) -> None:
     """Validate a CSV file and write it as a canonical parquet."""
 
@@ -28,7 +30,7 @@ def load_csv(
 
 @app.command()
 def query(
-    symbol: str | None = typer.Option(default=None),
+    symbol: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     """Query canonical daily-price data from DuckDB."""
     settings = get_settings()
