@@ -8,6 +8,7 @@ import pyarrow.parquet as pq
 from core.models.daily_prices import DailyPrice
 from core.data.daily_prices import load_daily_prices_csv
 from core.data.parquet import write_daily_prices_parquet
+from core.data.duckdb import connect, register_daily_prices_view
 
 def valid_record() -> dict:
     return {
@@ -70,4 +71,34 @@ def test_writes_sample_data_to_partitioned_parquet(tmp_path: Path) -> None:
         "RELIANCE",
         "TCS",
         "TCS"
+    ]
+
+def test_queries_parquet_data_with_duckdb(tmp_path: Path) -> None:
+    fixture_path = (
+        Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
+    )
+
+    records = load_daily_prices_csv(fixture_path)
+
+    parquet_directory = tmp_path / "daily_prices"
+    write_daily_prices_parquet(records, parquet_directory)
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    register_daily_prices_view(connection, parquet_directory)
+
+    rows = connection.execute(
+        """
+        SELECT symbol, close_price, trade_year
+        FROM daily_prices
+        ORDER BY symbol, trade_date
+        """
+    ).fetchall()
+
+    connection.close()
+
+    assert rows == [
+        ("RELIANCE", Decimal(1415.00000000), 2026),
+        ("RELIANCE", Decimal(1422.00000000), 2026),
+        ("TCS", Decimal(3235.00000000), 2026),
+        ("TCS", Decimal(3250.00000000), 2026),
     ]
