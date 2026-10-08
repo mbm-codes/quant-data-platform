@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -21,9 +21,9 @@ def valid_source_record() -> dict:
         "low_price": Decimal("10.334541346100153"),
         "close_price": Decimal("10.441109657287598"),
         "volume_qty": 48_051_995,
-        "dividends": Decimal("0"),
-        "stock_splits": Decimal("0"),
-        "ingested_at": datetime.now(timezone.utc),
+        "dividends": Decimal(0),
+        "stock_splits": Decimal(0),
+        "ingested_at": datetime.now(UTC),
         "run_id": "test-run",
         "dataset_version": "kaggle-2023-11",
 

@@ -1,20 +1,21 @@
 import gzip
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 
 from core.data.kaggle_historical import load_kaggle_historical_file
+
 
 def write_historical_fixture(path: Path) -> None:
     path.write_bytes(
         gzip.compress(
-            (
-                "Date,Open,High,Low,Close,Volume,Dividends,Stock Splits\n"
-                "1997-03-28 00:00:00+05:30,"
-                "15.412372589111326,15.412372589111326,"
-                "15.412372589111326,15.412372589111328,"
-                "0,0.0,0.0\n"
-            ).encode("utf-8")
+            
+                b"Date,Open,High,Low,Close,Volume,Dividends,Stock Splits\n"
+                b"1997-03-28 00:00:00+05:30,"
+                b"15.412372589111326,15.412372589111326,"
+                b"15.412372589111326,15.412372589111328,"
+                b"0,0.0,0.0\n"
+            
         )
     )
 
@@ -26,7 +27,7 @@ def test_loads_kaggle_historical_gzip_file(tmp_path: Path) -> None:
         source_path,
         run_id="test_run",
         dataset_version="kaggle-2023-11",
-        ingested_at=datetime.now(timezone.utc),
+        ingested_at=datetime.now(UTC),
     )
 
     assert len(records) == 1
