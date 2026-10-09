@@ -66,6 +66,12 @@ Valid staging rows: 6,444,054
 Quarantined rows: 4,130
 Files containing rejected rows: 343
 
+Staged Dataset Stats:
+- 6,444,054 validated rows
+- 1,940 symbols
+- Coverage: December 25, 1995 to November 1, 2023
+- 4,130 quarantined rows across 343 source files
+
 ## Source Attribution
 
 - Dataset origin: Kaggle

@@ -12,6 +12,7 @@ from core.data.kaggle_inventory import (
     inventory_kaggle_historical_directory,
     write_historical_source_inventory,
 )
+from core.data.kaggle_staging import stage_kaggle_historical_directory
 from core.data.parquet import write_daily_prices_parquet
 
 app = typer.Typer(no_args_is_help=True)
@@ -64,6 +65,37 @@ def inventory_historical(
     typer.echo(f"Total valid rows: {report['total_valid_rows']}")
     typer.echo(f"Total rejected rows: {report['total_rejected_rows']}")
     typer.echo(f"Report written to: {output_path}")
+
+@app.command("stage-historical")
+def stage_historical(
+    source_directory: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=False, dir_okay=True),
+    ],
+    run_id: Annotated[str, typer.Option()],
+    dataset_version: Annotated[str, typer.Option()] = "kaggle-2023-11",
+) -> None:
+    """Stage valid Kaggle historical rows and quarantine rejected rows."""
+    settings = get_settings()
+
+    result = stage_kaggle_historical_directory(
+        source_directory,
+        settings.data_dir
+        / "staging"
+        / "kaggle_historical_prices"
+        / f"run_id={run_id}",
+        settings.data_dir / "quarantine" / "kaggle_historical_rejections",
+        run_id=run_id,
+        dataset_version=dataset_version,
+        ingested_at=datetime.now(UTC),
+    )
+
+    typer.echo(f"Files discovered: {result.files_discovered}")
+    typer.echo(f"Files processed: {result.files_processed}")
+    typer.echo(f"Files failed: {result.files_failed}")
+    typer.echo(f"Valid rows staged: {result.valid_rows}")
+    typer.echo(f"Rows quarantined: {result.rejected_rows}")
+
 
 @app.command()
 def query(
