@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -7,6 +8,10 @@ import typer
 from core.config.settings import get_settings
 from core.data.daily_prices import load_daily_prices_csv
 from core.data.duckdb import connect, register_daily_prices_view
+from core.data.kaggle_inventory import (
+    inventory_kaggle_historical_directory,
+    write_historical_source_inventory,
+)
 from core.data.parquet import write_daily_prices_parquet
 
 app = typer.Typer(no_args_is_help=True)
@@ -27,6 +32,38 @@ def load_csv(
 
     for written_path in written_paths:
         typer.echo(f"Wrote {written_path}")
+
+@app.command()
+def inventory_historical(
+    source_directory: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=False, dir_okay=True),
+    ],
+    run_id: Annotated[str, typer.Option()],
+    dataset_version: Annotated[str, typer.Option()] = "kaggle-2023-11",
+    output_path: Annotated[Path, typer.Option()] = Path(
+        "reports/kaggle_historical_inventory.json"
+    ),
+) -> None:
+    """Validate and inventory Kaggle historical source files."""
+
+    inventory = inventory_kaggle_historical_directory(
+        source_directory,
+        run_id=run_id,
+        dataset_version=dataset_version,
+        ingested_at=datetime.now(UTC),
+    )
+
+    write_historical_source_inventory(inventory, output_path)
+    report = inventory.to_dict()
+
+    typer.echo(f"Files discovered: {report['files_discovered']}")
+    typer.echo(f"Files processed: {report['files_processed']}")
+    typer.echo(f"Files failed: {report['files_failed']}")
+    typer.echo(f"Files with rejected rows: {report['files_with_rejected_rows']}")
+    typer.echo(f"Total valid rows: {report['total_valid_rows']}")
+    typer.echo(f"Total rejected rows: {report['total_rejected_rows']}")
+    typer.echo(f"Report written to: {output_path}")
 
 @app.command()
 def query(

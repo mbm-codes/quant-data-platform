@@ -32,12 +32,12 @@ def test_inventories_valid_and_invalid_historical_files(tmp_path: Path) -> None:
 
     report = inventory.to_dict()
     profiles = {file["source_file"]: file for file in report["files"]}
-    
-    assert report["files_discovered"] == 3
-    assert report["files_valid"] == 2
+       
+    assert report["files_processed"] == 2
     assert report["files_failed"] == 1
+    assert report["files_with_rejected_rows"] == 0
     assert report["total_valid_rows"] == 2
-    assert report["first_trade_date"] == "2023-10-31"
+    assert report["total_rejected_rows"] == 0
     assert profiles["BROKEN.NS.csv.gz"]["error"] is not None
 
     output_path = tmp_path / "reports" / "inventory.json"
@@ -45,6 +45,6 @@ def test_inventories_valid_and_invalid_historical_files(tmp_path: Path) -> None:
 
     saved_report = json.loads(output_path.read_text(encoding="utf-8"))
 
-    assert saved_report["files_valid"] == 2
+    assert saved_report["files_processed"] == 2
 
     

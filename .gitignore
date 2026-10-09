@@ -221,3 +221,5 @@ part-*
 # Generated local data
 data/
 warehouse/
+
+reports/kaggle_historical_inventory.json

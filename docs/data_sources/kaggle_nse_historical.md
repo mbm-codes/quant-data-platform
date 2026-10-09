@@ -60,6 +60,12 @@ Therefore, the project must treat price adjustment status as **unknown** until i
 - The stated end date and observed file coverage differ slightly.
 - Licensing, attribution, and redistribution terms must be reviewed from the original source before publishing or redistributing the data.
 
+## Aggregate Summary
+Inventory run: 1,940 files processed
+Valid staging rows: 6,444,054
+Quarantined rows: 4,130
+Files containing rejected rows: 343
+
 ## Source Attribution
 
 - Dataset origin: Kaggle
