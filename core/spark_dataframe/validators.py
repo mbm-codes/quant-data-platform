@@ -1,4 +1,6 @@
-from pyspark.sql import functions as sf, Window
+from pyspark.sql import Window
+from pyspark.sql import functions as sf
+
 
 def get_duplicate_and_kept_records(df, partition_by_cols, order_by_cols):
     w = Window.partitionBy(partition_by_cols)\

@@ -219,7 +219,7 @@ _SUCCESS*
 part-*
 
 # Generated local data
-data/
+/data/
 warehouse/
 
 reports/kaggle_historical_inventory.json

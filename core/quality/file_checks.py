@@ -1,7 +1,7 @@
-import os
 import glob
-from typing import List
-from core.quality.base import DataQualityCheck, CheckResult
+import os
+
+from core.quality.base import CheckResult, DataQualityCheck
 from core.quality.enums import CheckStatus, DQAction
 
 
@@ -24,7 +24,7 @@ class FileExistsCheck(DataQualityCheck):
         self.min_files = min_files
         self.allow_glob = allow_glob
 
-    def _resolve_files(self) -> List[str]:
+    def _resolve_files(self) -> list[str]:
         if self.allow_glob and any(char in self.path for char in ["*", "?", "["]):
             return [f for f in glob.glob(self.path) if os.path.isfile(f)]
         return [self.path] if os.path.isfile(self.path) else []
@@ -87,5 +87,5 @@ class NonEmptyFileCheck(DataQualityCheck):
                 check_name="NonEmptyFileCheck",
                 status=CheckStatus.FAIL,
                 action=DQAction.OBSERVE,
-                message=f"Failed to read file: {str(e)}"
+                message=f"Failed to read file: {e!s}"
             )

@@ -1,4 +1,5 @@
-from core.quality.results import CheckStatus, DQAction
+from core.quality.results import CheckStatus
+
 
 class DataQualityRunner:
     def __init__(self, checks: list, logger=None):

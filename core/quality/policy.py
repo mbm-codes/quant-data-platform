@@ -1,4 +1,4 @@
-from core.quality.enums import CheckStatus, DQSeverity, DQAction
+from core.quality.enums import CheckStatus, DQAction, DQSeverity
 
 DQ_ACTION_MATRIX = {
     (CheckStatus.PASS, DQSeverity.WARN): DQAction.OBSERVE,

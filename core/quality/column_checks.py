@@ -1,11 +1,13 @@
-from typing import List, Optional, Dict, Any
+from typing import Any
+
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, greatest, least
 
 from core.quality.base import DataQualityCheck
-from core.quality.results import CheckResult
 from core.quality.enums import CheckStatus, DQAction, DQSeverity
-from core.quality.policy import DQ_ACTION_MATRIX, decide_action
+from core.quality.policy import decide_action
+from core.quality.results import CheckResult
+
 
 class NotNullCheck(DataQualityCheck):
     """
@@ -28,7 +30,7 @@ class NotNullCheck(DataQualityCheck):
         self.action_on_warn = action_on_warn
         self.action_on_fail = action_on_fail
 
-    def run(self, context: Optional[Dict[str, Any]] = None) -> CheckResult:
+    def run(self, context: dict[str, Any] | None = None) -> CheckResult:
         total_count = self.df.count()
         null_count = self.df.filter(col(self.column).isNull()).count()
 
@@ -77,23 +79,23 @@ class ValueRangeCheck(DataQualityCheck):
         self,
         df: DataFrame,
         column: str,
-        min_val: Optional[float] = None,
-        max_val: Optional[float] = None,
+        min_val: float | None = None,
+        max_val: float | None = None,
         *,
         inclusive_min: bool = True,
         inclusive_max: bool = True,
         allow_null: bool = False,
         mostly: float = 1.0,
-        where: Optional[str] = None,
+        where: str | None = None,
         severity: DQSeverity = DQSeverity.FAIL,
-        message: Optional[str] = None,
-        cast: Optional[str] = None,
+        message: str | None = None,
+        cast: str | None = None,
         strict_type: bool = False,
         sample_percent: int = 100,
-        tags: Optional[list[str]] = None,
-        owner: Optional[str] = None,
-        action_on_warn: Optional[DQAction] = DQAction.NONE,
-        action_on_fail: Optional[DQAction] = DQAction.NONE
+        tags: list[str] | None = None,
+        owner: str | None = None,
+        action_on_warn: DQAction | None = DQAction.NONE,
+        action_on_fail: DQAction | None = DQAction.NONE
     ):
         if mostly <= 0 or mostly > 1:
             raise ValueError("mostly must be in the range (0, 1].")
@@ -117,7 +119,7 @@ class ValueRangeCheck(DataQualityCheck):
         self.action_on_warn = action_on_warn
         self.action_on_fail = action_on_fail
 
-    def run(self, context: Optional[Dict[str, Any]] = None) -> CheckResult:
+    def run(self, context: dict[str, Any] | None = None) -> CheckResult:
         df = self.df
 
         # Apply conditional filter        
@@ -215,14 +217,14 @@ class OHLCInvariantCheck(DataQualityCheck):
             close_col: str = "close",
             allow_null: bool = False,
             mostly: float = 1.0,
-            where: Optional[str] = None,
+            where: str | None = None,
             severity: DQSeverity = DQSeverity.FAIL,
-            message: Optional[str] = None,
+            message: str | None = None,
             sample_percent: int = 100,
-            tags: Optional[List[str]] = None,
-            owner: Optional[str] = None,
-            action_on_warn: Optional[DQAction] = DQAction.NONE,
-            action_on_fail: Optional[DQAction] = DQAction.NONE,
+            tags: list[str] | None = None,
+            owner: str | None = None,
+            action_on_warn: DQAction | None = DQAction.NONE,
+            action_on_fail: DQAction | None = DQAction.NONE,
     ):
     
         if mostly <= 0 or mostly > 1:
@@ -244,7 +246,7 @@ class OHLCInvariantCheck(DataQualityCheck):
         self.action_on_warn = action_on_warn
         self.action_on_fail = action_on_fail
 
-    def run(self, context: Optional[Dict[str, Any]] = None) -> CheckResult:
+    def run(self, context: dict[str, Any] | None = None) -> CheckResult:
         df = self.df
 
         # Conditional filter

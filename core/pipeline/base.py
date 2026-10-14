@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+
 from pyspark.sql import DataFrame
-from typing import Union, Optional
+
 
 class PipelineBase(ABC):
     """
@@ -14,19 +15,16 @@ class PipelineBase(ABC):
         self.config = config
 
     @abstractmethod
-    def extract(self) -> Union[DataFrame, dict]:
+    def extract(self) -> DataFrame | dict:
         """Extract data from source"""
-        pass
 
     @abstractmethod
-    def transform(self, df_or_dfs: Union[DataFrame, dict], ctx) -> DataFrame:
+    def transform(self, df_or_dfs: DataFrame | dict, ctx) -> DataFrame:
         """Transform the extracted data"""
-        pass
 
     @abstractmethod
     def load(self, df):
         """Load the transformed data to sink"""
-        pass
 
     def run(self):
         """Orchestrate ETL flow"""
@@ -63,9 +61,11 @@ class PipelineBase(ABC):
         
 
     def create_execution_context(self):
-        from core.context.process_context import create_process_context, process_context_to_string
-        from core.control.job_control import JobControl
         from core.context.execution_context import ExecutionContext
+        from core.context.process_context import (
+            create_process_context,
+        )
+        from core.control.job_control import JobControl
 
         process_ctx = create_process_context(
             pipeline_version=self.config["pipeline_version"],
