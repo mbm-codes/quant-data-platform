@@ -1,34 +1,36 @@
 import argparse
-import time
-from core.pipeline.transformation_base import SilverPipelineBase
-from core.pipeline.transformation_factory import TransformationPipelineFactory
-from pyspark.sql import DataFrame, functions as sf
-from typing import Union
-from core.spark_dataframe.actions import safe_count
-from core.context.process_context import create_process_context, process_context_to_string
-from core.config.loader import load_config
-from core.logging.logging import QDPLogger
-from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from datetime import datetime, timezone
-import os
 import copy
-from pyspark.sql.window import Window
-from core.quality.factory.column_checks import build_column_checks
-from core.quality.factory.table_checks import build_table_checks
-from core.quality.runner import DataQualityRunner
-from core.quality.actions import apply_actions
+import os
+import time
+from datetime import UTC, datetime
+
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as sf
+
+from core.config.loader import load_config
+from core.context.process_context import (
+    process_context_to_string,
+)
+from core.exceptions.errors import (
+    DataQualityError,
+    InputDataError,
+    LoadError,
+    PipelineError,
+)
 from core.exceptions.exceptions import (
     DQExecutionException,
     PipelineException,
     TransformationException,
 )
-
-from core.exceptions.errors import (
-    InputDataError,
-    DataQualityError,
-    PipelineError,
-    LoadError,
-)
+from core.logging.logging import QDPLogger
+from core.pipeline.transformation_base import SilverPipelineBase
+from core.pipeline.transformation_factory import TransformationPipelineFactory
+from core.quality.actions import apply_actions
+from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.table_checks import build_table_checks
+from core.quality.runner import DataQualityRunner
+from core.spark_dataframe.actions import safe_count
+from lakehouse.iceberg.spark_session import SparkSessionBuilder
 
 pipeline_name = "nse_daily_bhavcopy_silver"
 layer = "silver"
@@ -51,7 +53,7 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
         self.logger.info("Running post-etl steps for NSE Daily Bhavcopy Data Pipeline")
         
 
-    def extract(self) -> Union[DataFrame, dict]:
+    def extract(self) -> DataFrame | dict:
         try:
             self.logger.info(
                 f"Reading {''.join(self.config['input_tables'].values())} bronze layer tables"
@@ -233,7 +235,7 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
                 f"Failed to write daily bhavcopy silver data to {self.output_table_name}"
             ) from e
     
-    def read_bronze(self) -> Union[DataFrame, dict]:
+    def read_bronze(self) -> DataFrame | dict:
         df_map = {}
         try:
             for tbl_typ, tbl_name in self.config["input_tables"].items():
@@ -305,7 +307,7 @@ class NSEDailyBhavcopySilver(SilverPipelineBase):
     def run_quality_checks(self, df: DataFrame, ctx):
         return super().run_quality_checks(df, ctx)
     
-    def read_silver(self) -> Union[DataFrame, dict]:
+    def read_silver(self) -> DataFrame | dict:
         return super().read_silver()
     
     def create_execution_context(self):
@@ -483,7 +485,7 @@ def main():
         ).get_spark()
 
         logger.attach_spark_logs(spark)
-        start_ts = datetime.now(timezone.utc)
+        start_ts = datetime.now(UTC)
         logger.info(f"Starting Silver NSE Bhavcopy Daily transformation in [{ENV}] at {start_ts}")
 
         # ==========================
@@ -492,7 +494,7 @@ def main():
         pipeline = TransformationPipelineFactory.get_pipeline("nse_daily_bhavcopy_silver", spark, logger, copy.deepcopy(CONFIG))
         pipeline.run()
 
-        end_ts = datetime.now(timezone.utc)
+        end_ts = datetime.now(UTC)
         duration = (end_ts - start_ts).total_seconds()
         logger.info(f"Ending transformation of NSE Bhavcopy Daily transformation in [{ENV}] at {end_ts.isoformat()} | (Duration: {duration}s)")
     

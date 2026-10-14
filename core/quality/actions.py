@@ -1,7 +1,8 @@
-from core.quality.enums import DQAction
-from pyspark.sql.functions import current_timestamp, lit, to_json, struct
+from pyspark.sql.functions import struct, to_json
+
 from core.quality.enums import DQAction
 from core.quality.results import CheckResult
+
 
 def write_quarantine_records(
         quarantined_df,

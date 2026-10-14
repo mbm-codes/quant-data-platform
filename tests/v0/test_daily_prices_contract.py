@@ -29,6 +29,7 @@ def valid_record() -> dict:
         "dataset_version": "v0",
     }
 
+
 def test_valid_daily_price_normalizes_symbol() -> None:
     record = DailyPrice.model_validate(valid_record())
 
@@ -45,9 +46,7 @@ def test_daily_price_rejects_invalid_ohlc_values() -> None:
 
 
 def test_loads_and_validates_sample_csv() -> None:
-    fixture_path = (
-        Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
-    )
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
 
     records = load_daily_prices_csv(fixture_path)
 
@@ -55,10 +54,9 @@ def test_loads_and_validates_sample_csv() -> None:
     assert records[0].symbol == "RELIANCE"
     assert records[0].close_price == Decimal("1415.00")
 
+
 def test_writes_sample_data_to_partitioned_parquet(tmp_path: Path) -> None:
-    fixture_path = (
-        Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
-    )
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
 
     records = load_daily_prices_csv(fixture_path)
     written_paths = write_daily_prices_parquet(records, tmp_path)
@@ -68,17 +66,11 @@ def test_writes_sample_data_to_partitioned_parquet(tmp_path: Path) -> None:
     table = pq.read_table(written_paths[0])
 
     assert table.num_rows == 4
-    assert table.column("symbol").to_pylist() == [
-        "RELIANCE",
-        "RELIANCE",
-        "TCS",
-        "TCS"
-    ]
+    assert table.column("symbol").to_pylist() == ["RELIANCE", "RELIANCE", "TCS", "TCS"]
+
 
 def test_queries_parquet_data_with_duckdb(tmp_path: Path) -> None:
-    fixture_path = (
-        Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
-    )
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
 
     records = load_daily_prices_csv(fixture_path)
 
@@ -104,3 +96,32 @@ def test_queries_parquet_data_with_duckdb(tmp_path: Path) -> None:
         ("TCS", Decimal("3235.00000000"), 2026),
         ("TCS", Decimal("3250.00000000"), 2026),
     ]
+
+
+def test_writes_separate_parquet_files_for_verified_sources(
+    tmp_path: Path,
+) -> None:
+    first = DailyPrice.model_validate(
+        {
+            **valid_record(),
+            "symbol": "RELIANCE",
+            "source_file": "sec_bhavdata_full_01012024.csv.gz",
+            "source_hash": "first-source-hash",
+        }
+    )
+    second = DailyPrice.model_validate(
+        {
+            **valid_record(),
+            "symbol": "TCS",
+            "source_file": "sec_bhavdata_full_02012024.csv.gz",
+            "source_hash": "second-source-hash",
+        }
+    )
+
+    written_paths = write_daily_prices_parquet([first, second], tmp_path)
+
+    assert len(written_paths) == 2
+    assert all(path.parent == tmp_path / "trade_year=2026" for path in written_paths)
+    assert all(path.name.startswith("source_file=") for path in written_paths)
+    assert all(path.suffix == ".parquet" for path in written_paths)
+    assert sorted(pq.read_table(path).num_rows for path in written_paths) == [1, 1]

@@ -1,5 +1,6 @@
+from core.quality.enums import DQAction, DQSeverity
 from core.quality.table_checks import UniquenessCheck
-from core.quality.enums import CheckStatus, DQSeverity, DQAction
+
 
 def build_table_checks(df, cfg: list):
     checks = []

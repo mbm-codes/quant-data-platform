@@ -1,16 +1,22 @@
-from pyspark.sql import Row
-from ingestion.nse.historical.historical_loads import NSEHistoricalDataPipeline, RAW_INPUT_SCHEMA 
-from core.context.process_context import create_process_context
-from core.logging.logging import QDPLogger
-from core.spark_dataframe.transforms import normalize_column_names
-from core.spark_dataframe.schema import enforce_schema
-import yaml
 import gzip
-import shutil
-import pytest
 import os
-from core.metrics.spark import SparkMetricsEmitter
+import shutil
+
+import pytest
+import yaml
+from pyspark.sql import Row
+
+from core.context.process_context import create_process_context
 from core.exceptions.errors import SchemaEnforcementError
+from core.logging.logging import QDPLogger
+from core.metrics.spark import SparkMetricsEmitter
+from core.spark_dataframe.schema import enforce_schema
+from core.spark_dataframe.transforms import normalize_column_names
+from ingestion.nse.historical.historical_loads import (
+    RAW_INPUT_SCHEMA,
+    NSEHistoricalDataPipeline,
+)
+
 
 # spark fixture is defined in tests/conftest.py
 # never import a fixture directly; pytest handles it
@@ -132,9 +138,8 @@ def test_extract_raises_on_schema_mismatch(pipeline, tmp_path):
     file = tmp_path / "invalid_test.csv"
     file.write_text(data)
 
-    with open(file, 'rb') as f_in:
-        with gzip.open(f"{file}.gz", 'wb') as f_out:
-            shutil.copyfileobj(f_in, f_out)
+    with open(file, 'rb') as f_in, gzip.open(f"{file}.gz", 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
 
 
     pipeline.config["input_pattern"] = str(file)+".gz"

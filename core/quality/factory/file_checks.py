@@ -1,5 +1,6 @@
 from core.quality.file_checks import FileExistsCheck, NonEmptyFileCheck
 
+
 def build_file_checks(spark, cfg: dict, file_path: str):
 
     checks = []

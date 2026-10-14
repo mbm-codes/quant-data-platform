@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+
 from core.quality.results import CheckResult
+
 
 class DataQualityCheck(ABC):
     
@@ -9,7 +11,6 @@ class DataQualityCheck(ABC):
         Execute the data quality check.
         Context is intentionally generic.
         """
-        pass
 
     
 

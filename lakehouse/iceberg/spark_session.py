@@ -1,6 +1,6 @@
 import os
-from pyspark.sql import SparkSession
 
+from pyspark.sql import SparkSession
 
 # macOS: Force PySpark to use the correct Java 11
 # os.environ["JAVA_HOME"] = "/opt/homebrew/opt/openjdk@11/libexec/openjdk.jdk/Contents/Home"

@@ -1,6 +1,7 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as sf
 
+
 class DataQualityChecks:
     """
     Standalone class for performing data quality checks on Spark DataFrames.

@@ -1,9 +1,7 @@
-from dataclasses import dataclass
-from datetime import datetime, timezone
-import uuid
 import os
-from typing import Optional, Dict
-from core.context.orchestrator_context import normalize_orchestrator_context
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 
 # =========================
@@ -54,12 +52,12 @@ def _generate_process_id(spark=None, process_name: str = "") -> str:
         except Exception:
             pass
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    ts = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
     name_part = process_name.replace(" ", "_")[:20] if process_name else "python"
     return f"{name_part}-{ts}-{uuid.uuid4().hex[:8]}"
 
 
-def _generate_run_id(force_new: bool = False, existing_run_id: Optional[str] = None) -> str:
+def _generate_run_id(force_new: bool = False, existing_run_id: str | None = None) -> str:
     """
     Generates a run_id for this attempt.
     - force_new=True → always generate a new UUID
@@ -71,7 +69,7 @@ def _generate_run_id(force_new: bool = False, existing_run_id: Optional[str] = N
     return existing_run_id
 
 
-def _extract_orchestrator_metadata(orchestrator_context: Optional[Dict] = None) -> Dict:
+def _extract_orchestrator_metadata(orchestrator_context: dict | None = None) -> dict:
     """
     Extracts common fields from orchestration tool context.
     Supports Airflow, Prefect, Argo, etc.
@@ -110,12 +108,12 @@ def _extract_orchestrator_metadata(orchestrator_context: Optional[Dict] = None) 
 def create_process_context(
         pipeline_version: str,
         is_backfill: bool = False,
-        process_id: Optional[str] = None,
-        run_id: Optional[str] = None,
-        process_name: Optional[str] = None,
+        process_id: str | None = None,
+        run_id: str | None = None,
+        process_name: str | None = None,
         spark=None,
         force_new_run_id: bool = False,
-        orchestrator_context: Optional[Dict] = None
+        orchestrator_context: dict | None = None
 ) -> ProcessContext:
     """
     Creates a ProcessContext with orchestration-awareness, Spark support, and retry-friendly run_id.
@@ -130,7 +128,7 @@ def create_process_context(
     - force_new_run_id: bool, generate new run_id for retry
     - orchestrator_context: optional dict with orchestration metadata (Airflow, Prefect, etc.)
     """
-    ts = datetime.now(timezone.utc)
+    ts = datetime.now(UTC)
 
     # Extract metadata from orchestration tool
     orchestration_metadata = _extract_orchestrator_metadata(orchestrator_context)

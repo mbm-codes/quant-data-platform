@@ -1,15 +1,16 @@
-from core.metrics.emitter import MetricsEmitter
+from datetime import UTC, datetime
+
 from pyspark.sql import Row
-from datetime import datetime, timezone
 from pyspark.sql.types import (
-    StructType,
-    StructField,
-    StringType,
-    TimestampType,
     DoubleType,
     MapType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
 )
 
+from core.metrics.emitter import MetricsEmitter
 
 
 class SparkMetricsEmitter(MetricsEmitter):
@@ -40,7 +41,7 @@ class SparkMetricsEmitter(MetricsEmitter):
         layer = merged_tags.pop("layer", None)
 
         row = Row(
-            ts=datetime.now(timezone.utc),
+            ts=datetime.now(UTC),
             metric_name=name,
             metric_type=metric_type,
             metric_value=float(value),

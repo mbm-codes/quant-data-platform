@@ -7,32 +7,53 @@
 # metadata enrichment, and post-load cleanup of Iceberg snapshots and orphan files.
 # Note - The source data is entire NSE historical data until 2023-10-31  
 
-import os
-from time import time
-import yaml
 import argparse
+import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-from pyspark.sql import functions as sf, DataFrame
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType, LongType  
-from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from core.logging.logging import QDPLogger
+from datetime import timedelta
+from time import time
+
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as sf
+from pyspark.sql.types import (
+    DateType,
+    DoubleType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+
+from core.config.loader import load_config
 from core.context.process_context import process_context_to_string
+from core.exceptions.errors import (
+    DataQualityError,
+    InputDataError,
+    LoadError,
+    PipelineError,
+    PostETLError,
+    SchemaEnforcementError,
+)
+from core.exceptions.exceptions import (
+    DQExecutionException,
+    PipelineException,
+    TransformationException,
+)
+from core.logging.logging import QDPLogger
 from core.pipeline.base import PipelineBase
 from core.pipeline.factory import PipelineFactory
-from core.quality.checks import DataQualityChecks
-from core.config.loader import load_config
-from core.spark_dataframe.transforms import normalize_column_names, trim_and_nullify_strings
+from core.quality.actions import apply_actions
+from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.file_checks import build_file_checks
+from core.quality.factory.table_checks import build_table_checks
+from core.quality.runner import DataQualityRunner
 from core.spark_dataframe.actions import safe_count
 from core.spark_dataframe.schema import enforce_schema
-from core.quality.runner import DataQualityRunner
-from core.quality.factory.file_checks import build_file_checks
-from core.quality.factory.column_checks import build_column_checks
-from core.quality.factory.table_checks import build_table_checks
-from core.quality.actions import apply_actions
-from core.exceptions.exceptions import DQExecutionException, PipelineException, TransformationException
-from core.exceptions.errors import InputDataError, DataQualityError, SchemaEnforcementError, PipelineError, LoadError, PostETLError
+from core.spark_dataframe.transforms import (
+    normalize_column_names,
+    trim_and_nullify_strings,
+)
+from lakehouse.iceberg.spark_session import SparkSessionBuilder
 
 # ==========================
 # Schemas and DDLs
@@ -478,9 +499,9 @@ class PipelineArgs:
     env: str
     load_type: str
     is_backfill: bool
-    run_id: Optional[str]
-    process_id: Optional[str]
-    input_pattern: Optional[str]
+    run_id: str | None
+    process_id: str | None
+    input_pattern: str | None
     
 def build_pipeline_args(ns: argparse.Namespace) -> PipelineArgs:
     return PipelineArgs(

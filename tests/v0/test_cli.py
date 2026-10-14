@@ -7,14 +7,13 @@ from core.config.settings import get_settings
 
 runner = CliRunner()
 
+
 def test_load_and_query_sample_prices(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("QDP_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("QDP_DATABASE_PATH", str(tmp_path / "qdp.duckdb"))
     get_settings.cache_clear()
 
-    fixture_path = (
-        Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
-    )
+    fixture_path = Path(__file__).parents[1] / "fixtures" / "v0" / "daily_prices.csv"
 
     load_result = runner.invoke(app, ["load-csv", str(fixture_path)])
 

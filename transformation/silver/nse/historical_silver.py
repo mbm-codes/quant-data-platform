@@ -1,24 +1,36 @@
 import argparse
+import copy
+import os
 import time
+
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as sf
+
+from core.config.loader import load_config
+from core.context.process_context import (
+    process_context_to_string,
+)
+from core.exceptions.errors import (
+    DataQualityError,
+    InputDataError,
+    LoadError,
+    PipelineError,
+    PostETLError,
+)
+from core.exceptions.exceptions import (
+    DQExecutionException,
+    PipelineException,
+    TransformationException,
+)
+from core.logging.logging import QDPLogger
 from core.pipeline.transformation_base import SilverPipelineBase
 from core.pipeline.transformation_factory import TransformationPipelineFactory
-from pyspark.sql import DataFrame, functions as sf
-from typing import Union
-from core.spark_dataframe.actions import safe_count
-from core.context.process_context import create_process_context, process_context_to_string
-from core.config.loader import load_config
-from core.logging.logging import QDPLogger
-from lakehouse.iceberg.spark_session import SparkSessionBuilder
-from datetime import datetime, timezone
-import os
-import copy
+from core.quality.actions import apply_actions
 from core.quality.factory.column_checks import build_column_checks
 from core.quality.factory.table_checks import build_table_checks
 from core.quality.runner import DataQualityRunner
-from core.quality.actions import apply_actions
-from core.exceptions.exceptions import DQExecutionException, PipelineException, TransformationException
-from core.exceptions.errors import InputDataError, DataQualityError, SchemaEnforcementError, PipelineError, LoadError, PostETLError
-
+from core.spark_dataframe.actions import safe_count
+from lakehouse.iceberg.spark_session import SparkSessionBuilder
 
 pipeline_name = "nse_historical_silver"
 layer = "silver"
@@ -45,7 +57,7 @@ class NSEHistoricalSilver(SilverPipelineBase):
             ) from e
 
         
-    def extract(self) -> Union[DataFrame, dict]:
+    def extract(self) -> DataFrame | dict:
         try:
             self.logger.info(
                 f"Reading {''.join(self.config['input_tables'].values())} bronze layer tables"
@@ -217,7 +229,7 @@ class NSEHistoricalSilver(SilverPipelineBase):
             ) from e
 
     
-    def read_bronze(self) -> Union[DataFrame, dict]:
+    def read_bronze(self) -> DataFrame | dict:
         df_map = {}
         try:
             for tbl_typ, tbl_name in self.config["input_tables"].items():
@@ -318,7 +330,7 @@ class NSEHistoricalSilver(SilverPipelineBase):
     def create_execution_context(self):
         return super().create_execution_context()
     
-    def read_silver(self) -> Union[DataFrame, dict]:
+    def read_silver(self) -> DataFrame | dict:
         return super().read_silver()
 
     def run(self):
@@ -382,7 +394,7 @@ class NSEHistoricalSilver(SilverPipelineBase):
             self.logger.error("Silver pipeline failed due to domain error")
             raise
 
-        except Exception as e:
+        except Exception:
             self.metrics.increment(
                 "pipeline.run.failure",
                 tags={

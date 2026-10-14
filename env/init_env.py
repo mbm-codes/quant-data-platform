@@ -1,12 +1,8 @@
 
-from pyspark.sql import SparkSession
-from lakehouse.iceberg.spark_session import SparkSessionBuilder
 import os
 import subprocess
 
-
-
-
+from lakehouse.iceberg.spark_session import SparkSessionBuilder
 
 # ---- CONFIG ----
 WAREHOUSE_PATH = "/Users/mihirmehta/Desktop/Study/projects/quant-data-platform/warehouse"

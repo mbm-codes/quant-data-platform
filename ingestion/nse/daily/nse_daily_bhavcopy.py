@@ -1,34 +1,54 @@
+import argparse
+import copy
+import gzip
+import os
+import random
+import time
+from datetime import datetime, timedelta
+
 import requests
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as sf
+from pyspark.sql.types import (
+    DateType,
+    DoubleType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from urllib3.exceptions import HTTPError
-import os
-from datetime import datetime, timedelta, timezone
-import gzip
-import time
-from lakehouse.iceberg.spark_session import SparkSessionBuilder
+
+from core.config.loader import load_config
+from core.context.process_context import process_context_to_string
+from core.exceptions.errors import (
+    DataQualityError,
+    PipelineError,
+    SchemaEnforcementError,
+)
+from core.exceptions.exceptions import (
+    DQExecutionException,
+    PipelineException,
+    TransformationException,
+)
+from core.logging.logging import QDPLogger
 from core.pipeline.base import PipelineBase
 from core.pipeline.factory import PipelineFactory
-from core.config.loader import load_config
-from core.logging.logging import QDPLogger
-from pyspark.sql import functions as sf, DataFrame
-from pyspark.sql.types import StringType, StructField, StructType, DateType, DoubleType, LongType
-from core.spark_dataframe.transforms import normalize_column_names, trim_and_nullify_strings, standardize_date, cast_and_rename_columns
-import copy
-import random
-import argparse
-from core.quality.checks import DataQualityChecks
-from core.spark_dataframe.actions import safe_count
-from core.spark_dataframe.schema import enforce_schema
-from core.context.process_context import process_context_to_string
-from core.quality.factory.file_checks import build_file_checks
+from core.quality.actions import apply_actions
 from core.quality.factory.column_checks import build_column_checks
+from core.quality.factory.file_checks import build_file_checks
 from core.quality.factory.table_checks import build_table_checks
 from core.quality.runner import DataQualityRunner
-from core.quality.actions import apply_actions
-from core.exceptions.exceptions import DQExecutionException, PipelineException, TransformationException
-from core.exceptions.errors import InputDataError, DataQualityError, SchemaEnforcementError, PipelineError, LoadError, PostETLError
-
+from core.spark_dataframe.actions import safe_count
+from core.spark_dataframe.schema import enforce_schema
+from core.spark_dataframe.transforms import (
+    cast_and_rename_columns,
+    normalize_column_names,
+    standardize_date,
+    trim_and_nullify_strings,
+)
+from lakehouse.iceberg.spark_session import SparkSessionBuilder
 
 # What we EXPECT to see in the CSV (strings because CSV)
 RAW_INPUT_SCHEMA = StructType([
@@ -104,7 +124,7 @@ class NSEDailyData(PipelineBase):
                 #fetch_data(base_url+dt+".csv", output_path, self.logger)
                 pass
         except Exception as e:
-            self.logger.error(f"Error encountered : {str(e)}")
+            self.logger.error(f"Error encountered : {e!s}")
             raise
         #read_data
         self.logger.info("Ended fetching NSE daily bhavcopy!")
@@ -452,14 +472,14 @@ def fetch_data(url, output_path, logger, metrics):
         )
         time.sleep(random.randint(2,4))
     except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP Error encountered: {str(e)}")
+        logger.error(f"HTTP Error encountered: {e!s}")
         metrics.increment(
             "pipeline.http.failure",
             tags={"pipeline": "nse_daily_bhavcopy"}
         )
         raise
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error encountered: {str(e)}")
+        logger.error(f"Error encountered: {e!s}")
         metrics.increment(
             "pipeline.http.failure",
             tags={"pipeline": "nse_daily_bhavcopy"}

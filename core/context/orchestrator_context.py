@@ -1,17 +1,17 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Union
+
 
 @dataclass(frozen=True)
 class OrchestratorContext:
-    run_id: Optional[str] = None
-    process_name: Optional[str] = None
-    is_backfill: Optional[bool] = None
-    execution_date: Optional[str] = None
+    run_id: str | None = None
+    process_name: str | None = None
+    is_backfill: bool | None = None
+    execution_date: str | None = None
 
 
 def normalize_orchestrator_context(
-        ctx: Optional[Union[Dict, OrchestratorContext]]
-) -> Dict:
+        ctx: dict | OrchestratorContext | None
+) -> dict:
     
     """
     Normalizes orchestrator context from different sources

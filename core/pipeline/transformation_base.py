@@ -1,7 +1,9 @@
-from abc import ABC, abstractmethod
-from core.pipeline.base import PipelineBase
+from abc import abstractmethod
+
 from pyspark.sql import DataFrame
-from typing import Union
+
+from core.pipeline.base import PipelineBase
+
 
 class SilverPipelineBase(PipelineBase):
     """
@@ -9,7 +11,7 @@ class SilverPipelineBase(PipelineBase):
     Inherits from PipelineBase to reuse lifecycle, logging and hooks
     """
 
-    def extract(self) -> Union[DataFrame, dict]:
+    def extract(self) -> DataFrame | dict:
         return self.read_bronze()
 
     def transform(self, df_or_dfs, ctx) -> DataFrame:
@@ -29,11 +31,11 @@ class SilverPipelineBase(PipelineBase):
 
     # Abstract methonds for concerte implementation
     @abstractmethod
-    def read_bronze(self) -> Union[DataFrame, dict]:
+    def read_bronze(self) -> DataFrame | dict:
         pass
 
     @abstractmethod
-    def read_silver(self) -> Union[DataFrame, dict]:
+    def read_silver(self) -> DataFrame | dict:
         pass
 
     @abstractmethod

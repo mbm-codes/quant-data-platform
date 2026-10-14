@@ -1,5 +1,13 @@
 from pyspark.sql import functions as sf
-from pyspark.sql.types import MapType, StringType,IntegerType,DoubleType,DecimalType,LongType,BooleanType,FloatType,DateType,TimestampType, DataType, _parse_datatype_string, StructType, ArrayType
+from pyspark.sql.types import (
+    ArrayType,
+    DecimalType,
+    MapType,
+    StringType,
+    StructType,
+    _parse_datatype_string,
+)
+
 
 def normalize_column_names(df):
     return df.select([sf.col(c).alias(c.strip().lower().replace(" ", "_")) for c in df.columns])
