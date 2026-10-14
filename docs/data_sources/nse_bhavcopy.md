@@ -34,3 +34,20 @@ The canonical V0 record therefore uses `price_basis="raw"`.
 `PREV_CLOSE`, `LAST_PRICE`, `AVG_PRICE`, turnover, trade-count, and delivery
 fields are retained only in the source file and are not part of the V0
 canonical daily-price contract.
+
+## Observed V0 staging result
+
+The source directory contained 690 compressed files. Some non-trading-day downloads
+duplicated the prior trading day's identical bhavcopy.
+
+The V0 staging process retained one deterministic identical source file per actual
+`DATE1` trade date and skipped redundant copies.
+
+| Metric | Value |
+| --- | ---: |
+| Source files discovered | 690 |
+| Canonical source files retained | 554 |
+| Canonical daily-price rows | 1,107,711 |
+| Duplicate business keys | 0 |
+| First trade date | 2023-10-30 |
+| Last trade date | 2026-01-20 |

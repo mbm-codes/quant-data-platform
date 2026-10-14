@@ -9,10 +9,8 @@ from core.data.kaggle_inventory import (
 )
 
 HEADER = "Date,Open,High,Low,Close,Volume,Dividends,Stock Splits\n"
-VALID_ROW = (
-    "2023-10-31 00:00:00+05:30,"
-    "100.00,110.00,90.00,105.00,1000,0.0,0.0\n"
-)
+VALID_ROW = "2023-10-31 00:00:00+05:30,100.00,110.00,90.00,105.00,1000,0.0,0.0\n"
+
 
 def write_gzip_file(path: Path, content: str) -> None:
     path.write_bytes(gzip.compress(content.encode("utf-8")))
@@ -32,7 +30,7 @@ def test_inventories_valid_and_invalid_historical_files(tmp_path: Path) -> None:
 
     report = inventory.to_dict()
     profiles = {file["source_file"]: file for file in report["files"]}
-       
+
     assert report["files_processed"] == 2
     assert report["files_failed"] == 1
     assert report["files_with_rejected_rows"] == 0
@@ -46,5 +44,3 @@ def test_inventories_valid_and_invalid_historical_files(tmp_path: Path) -> None:
     saved_report = json.loads(output_path.read_text(encoding="utf-8"))
 
     assert saved_report["files_processed"] == 2
-
-    

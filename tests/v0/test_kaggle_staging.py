@@ -6,15 +6,9 @@ from core.data.kaggle_staging import stage_kaggle_historical_directory
 
 HEADER = "Date,Open,High,Low,Close,Volume,Dividends,Stock Splits\n"
 
-VALID_ROW = (
-    "2023-10-31 00:00:00+05:30,"
-    "100.00,110.00,90.00,105.00,1000,0.0,0.0\n"
-)
+VALID_ROW = "2023-10-31 00:00:00+05:30,100.00,110.00,90.00,105.00,1000,0.0,0.0\n"
 
-INVALID_ROW = (
-    "2023-11-01 00:00:00+05:30,"
-    "100.00,99.00,90.00,105.00,1000,0.0,0.0\n"
-)
+INVALID_ROW = "2023-11-01 00:00:00+05:30,100.00,99.00,90.00,105.00,1000,0.0,0.0\n"
 
 
 def write_gzip_file(path: Path, content: str) -> None:

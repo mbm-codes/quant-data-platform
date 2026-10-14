@@ -9,6 +9,7 @@ from core.models.historical_source_prices import HistoricalSourcePrice
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
 def valid_source_record() -> dict:
     return {
         "source_symbol": "reliance.ns",
@@ -26,8 +27,8 @@ def valid_source_record() -> dict:
         "ingested_at": datetime.now(UTC),
         "run_id": "test-run",
         "dataset_version": "kaggle-2023-11",
-
     }
+
 
 def test_historical_source_price_normalizes_symbols() -> None:
     record = HistoricalSourcePrice.model_validate(valid_source_record())
@@ -35,6 +36,7 @@ def test_historical_source_price_normalizes_symbols() -> None:
     assert record.source_symbol == "RELIANCE.NS"
     assert record.symbol == "RELIANCE"
     assert record.price_basis == "unknown"
+
 
 def test_historical_source_price_rejects_mismatched_trade_date() -> None:
     record = valid_source_record()
