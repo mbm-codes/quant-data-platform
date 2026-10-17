@@ -162,6 +162,7 @@ def portfolio_value(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
     as_of: Annotated[str, typer.Option()],
     run_id: Annotated[str, typer.Option()],
+    max_price_age_days: Annotated[int, typer.Option()] = 7,
 ) -> None:
     """Value active portfolio positions using official daily close prices."""
 
@@ -196,12 +197,15 @@ def portfolio_value(
             connection,
             positions,
             as_of=as_of_date,
+            max_price_age_days=max_price_age_days,
         )
     except duckdb.IOException as error:
         raise typer.BadParameter(
             "No canonical daily-price Parquet data exists yet. "
             "Run stage-bhavcopy first."
         ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
     finally:
         connection.close()
 

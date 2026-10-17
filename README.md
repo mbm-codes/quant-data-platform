@@ -151,3 +151,16 @@ transaction_id,account_id,symbol,trade_date,side,quantity,unit_price,fees
 example-001,main,RELIANCE,2024-01-02,BUY,10,2510.00,20.00
 example-002,main,RELIANCE,2024-01-03,SELL,4,2520.00,20.00
 
+### Price freshness
+
+By default, `portfolio-value` rejects a close price that is more than seven
+calendar days older than the requested `--as-of` date. Override the threshold
+only when appropriate:
+
+```bash
+uv run python -m core.cli portfolio-value \
+  examples/portfolio_transactions.example.csv \
+  --as-of 2024-01-05 \
+  --max-price-age-days 7 \
+  --run-id m3-freshness-check
+
