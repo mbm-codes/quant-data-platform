@@ -21,7 +21,7 @@ DAILY_PRICES_SCHEMA = pa.schema(
         pa.field("price_basis", pa.string(), nullable=False),
         pa.field("source_name", pa.string(), nullable=False),
         pa.field("source_file", pa.string(), nullable=False),
-        pa.field("source_hash", pa.string(), nullable=False),
+        pa.field("source_hash", pa.string(), nullable=True),
         pa.field("ingested_at", pa.timestamp("us", tz="UTC"), nullable=False),
         pa.field("run_id", pa.string(), nullable=False),
         pa.field("dataset_version", pa.string(), nullable=False),

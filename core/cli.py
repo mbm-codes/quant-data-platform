@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +16,9 @@ from core.data.kaggle_inventory import (
 from core.data.kaggle_staging import stage_kaggle_historical_directory
 from core.data.nse_bhavcopy_staging import stage_nse_bhavcopy_directory
 from core.data.parquet import write_daily_prices_parquet
+from core.data.transactions import load_portfolio_transactions_csv
+from core.portfolio import calculate_positions
+from core.valuation import value_positions
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -123,6 +127,104 @@ def stage_bhavcopy(
     typer.echo(f"Files failed: {result.files_failed}")
     typer.echo(f"Duplicate files skipped: {result.duplicate_files_skipped}")
     typer.echo(f"Valid rows staged: {result.valid_rows}")
+
+
+@app.command("portfolio-positions")
+def portfolio_positions(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    run_id: Annotated[str, typer.Option()],
+) -> None:
+    """Calculate active portfolio positions from transaction events."""
+    transactions = load_portfolio_transactions_csv(
+        source, run_id=run_id, ingested_at=datetime.now(UTC)
+    )
+    positions = calculate_positions(transactions)
+
+    if not positions:
+        typer.echo("No active positions.")
+        return
+
+    for position in positions:
+        typer.echo(
+            " | ".join(
+                [
+                    position.account_id,
+                    position.exchange,
+                    position.symbol,
+                    str(position.quantity),
+                ]
+            )
+        )
+
+
+@app.command("portfolio-value")
+def portfolio_value(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    as_of: Annotated[str, typer.Option()],
+    run_id: Annotated[str, typer.Option()],
+) -> None:
+    """Value active portfolio positions using official daily close prices."""
+
+    try:
+        as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    settings = get_settings()
+    transactions = load_portfolio_transactions_csv(
+        source,
+        run_id=run_id,
+        ingested_at=datetime.now(UTC),
+    )
+    positions = calculate_positions(transactions)
+
+    if not positions:
+        typer.echo("No active positions.")
+        return
+
+    connection = connect(settings.database_path)
+
+    try:
+        register_daily_prices_view(
+            connection,
+            settings.data_dir / "daily_prices",
+        )
+        valuations = value_positions(
+            connection,
+            positions,
+            as_of=as_of_date,
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "No canonical daily-price Parquet data exists yet. "
+            "Run stage-bhavcopy first."
+        ) from error
+    finally:
+        connection.close()
+
+    for valuation in valuations:
+        typer.echo(
+            " | ".join(
+                [
+                    valuation.account_id,
+                    valuation.exchange,
+                    valuation.symbol,
+                    str(valuation.quantity),
+                    valuation.price_date.isoformat(),
+                    str(valuation.close_price),
+                    str(valuation.market_value),
+                ]
+            )
+        )
+
+    total_market_value = sum(
+        (valuation.market_value for valuation in valuations),
+        start=Decimal(0),
+    )
+    typer.echo(f"Total market value | {total_market_value}")
 
 
 @app.command()
