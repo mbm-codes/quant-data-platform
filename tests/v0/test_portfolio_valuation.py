@@ -90,3 +90,30 @@ def test_rejects_position_without_available_price(tmp_path: Path) -> None:
         )
 
     connection.close()
+
+
+def test_rejects_close_price_older_than_allowed_age(tmp_path: Path) -> None:
+    parquet_directory = tmp_path / "daily_prices"
+    write_daily_prices_parquet(
+        [make_price(date(2024, 1, 2), "2510.00")],
+        parquet_directory,
+    )
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    register_daily_prices_view(connection, parquet_directory)
+
+    positions = [
+        PortfolioPosition(
+            account_id="main",
+            symbol="RELIANCE",
+            quantity=Decimal(1),
+        )
+    ]
+
+    with pytest.raises(ValueError, match="Stale close price"):
+        value_positions(
+            connection,
+            positions,
+            as_of=date(2024, 1, 12),
+            max_price_age_days=5,
+        )
