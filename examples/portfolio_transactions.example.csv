@@ -1,0 +1,3 @@
+transaction_id,account_id,symbol,trade_date,side,quantity,unit_price,fees
+example-001,main,RELIANCE,2024-01-02,BUY,10,2510.00,20.00
+example-002,main,RELIANCE,2024-01-03,SELL,4,2520.00,20.00

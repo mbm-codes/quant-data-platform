@@ -142,3 +142,12 @@ CSV → schema validation → partitioned Parquet → DuckDB → CLI query
 
 The existing Spark-based ingestion, Iceberg setup, and Spark test suite are preserved as legacy and future scale-out work. They are not required for the V0 local workflow.
 
+## Portfolio valuation (V0)
+
+Create a transaction CSV using this schema:
+
+```csv
+transaction_id,account_id,symbol,trade_date,side,quantity,unit_price,fees
+example-001,main,RELIANCE,2024-01-02,BUY,10,2510.00,20.00
+example-002,main,RELIANCE,2024-01-03,SELL,4,2520.00,20.00
+
