@@ -164,3 +164,12 @@ uv run python -m core.cli portfolio-value \
   --max-price-age-days 7 \
   --run-id m3-freshness-check
 
+## Recommendation ledger (V0)
+
+Recommendations are immutable, versioned records. Each entry stores the action,
+strategy/version, as-of date, price date, score, rationale, run ID, and market
+data version used to produce it.
+
+The ledger is written as append-only Parquet, partitioned by recommendation
+as-of year. Reusing an existing recommendation ID is rejected rather than
+overwriting prior advice.
