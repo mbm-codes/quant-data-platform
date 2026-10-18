@@ -11,14 +11,14 @@ def connect(database_path: Path) -> duckdb.DuckDBPyConnection:
 
 
 def register_daily_prices_view(
-        connection: duckdb.DuckDBPyConnection,
-        parquet_directory: Path,
+    connection: duckdb.DuckDBPyConnection,
+    parquet_directory: Path,
 ) -> None:
     """Expose year-partitioned daily-price parquet files as a DuckDB view."""
 
     parquet_glob = (
-        parquet_directory / "trade_year=*" / "*.parquet"
-    ).as_posix().replace("'", "''")
+        (parquet_directory / "trade_year=*" / "*.parquet").as_posix().replace("'", "''")
+    )
 
     connection.execute(
         f"""
@@ -32,3 +32,22 @@ def register_daily_prices_view(
     )
 
 
+def register_recommendations_view(
+    connection: duckdb.DuckDBPyConnection,
+    parquet_directory: Path,
+) -> None:
+    """Expose recommendation-ledger Parquet files as a DuckDB view."""
+    parquet_glob = (
+        (parquet_directory / "as_of_year=*" / "*.parquet").as_posix().replace("'", "'")
+    )
+
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW recommendations AS
+        SELECT *
+        FROM read_parquet(
+            '{parquet_glob}',
+            hive_partitioning = true
+        );
+        """
+    )
