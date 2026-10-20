@@ -2,9 +2,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.data.transactions import load_portfolio_transactions_csv
+from core.services.portfolio import get_portfolio_positions
 
 
-def test_loads_and_normalizes_portfolio_transactions(tmp_path: Path) -> None:
+def test_service_loads_transactions_calculates_positions(tmp_path: Path) -> None:
     source_path = tmp_path / "portfolio_transactions.csv"
     source_path.write_text(
         "transaction_id,account_id,symbol,trade_date,side,"
