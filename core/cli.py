@@ -1,3 +1,5 @@
+# core/cli.py
+
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -20,6 +22,8 @@ from core.data.transactions import load_portfolio_transactions_csv
 from core.portfolio import calculate_positions
 from core.valuation import value_positions
 
+from core.services.portfolio import get_portfolio_positions, value_portfolio
+
 app = typer.Typer(no_args_is_help=True)
 
 
@@ -41,7 +45,7 @@ def load_csv(
         typer.echo(f"Wrote {written_path}")
 
 
-@app.command()
+@app.command("inventory-historical")
 def inventory_historical(
     source_directory: Annotated[
         Path,
@@ -135,11 +139,13 @@ def portfolio_positions(
     run_id: Annotated[str, typer.Option()],
 ) -> None:
     """Calculate active portfolio positions from transaction events."""
-    transactions = load_portfolio_transactions_csv(
-        source, run_id=run_id, ingested_at=datetime.now(UTC)
-    )
-    positions = calculate_positions(transactions)
 
+    positions = get_portfolio_positions(
+        source=source,
+        run_id=run_id,
+        ingested_at=datetime.now(UTC)
+    )
+    
     if not positions:
         typer.echo("No active positions.")
         return
@@ -165,7 +171,7 @@ def portfolio_value(
     max_price_age_days: Annotated[int, typer.Option()] = 7,
 ) -> None:
     """Value active portfolio positions using official daily close prices."""
-
+    ingested_at = datetime.now(UTC)
     try:
         as_of_date = date.fromisoformat(as_of)
     except ValueError as error:
@@ -175,30 +181,22 @@ def portfolio_value(
         ) from error
 
     settings = get_settings()
-    transactions = load_portfolio_transactions_csv(
-        source,
-        run_id=run_id,
-        ingested_at=datetime.now(UTC),
-    )
-    positions = calculate_positions(transactions)
-
-    if not positions:
-        typer.echo("No active positions.")
-        return
-
-    connection = connect(settings.database_path)
-
+  
     try:
-        register_daily_prices_view(
-            connection,
-            settings.data_dir / "daily_prices",
-        )
-        valuations = value_positions(
-            connection,
-            positions,
+        valuations = value_portfolio(
+            source,
+            run_id=run_id,
+            ingested_at=ingested_at,
             as_of=as_of_date,
             max_price_age_days=max_price_age_days,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
         )
+
+        if not valuations:
+            typer.echo("No active positions.")
+            return
+        
     except duckdb.IOException as error:
         raise typer.BadParameter(
             "No canonical daily-price Parquet data exists yet. "
@@ -206,8 +204,6 @@ def portfolio_value(
         ) from error
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
-    finally:
-        connection.close()
 
     for valuation in valuations:
         typer.echo(
@@ -229,6 +225,78 @@ def portfolio_value(
         start=Decimal(0),
     )
     typer.echo(f"Total market value | {total_market_value}")
+
+# @app.command("recommendation-preview")
+# def recommendation_preview(
+#     symbol: Annotated[str, typer.Argument(exists=True)],
+#     account_id: Annotated[str, typer.Argument(exists=True)],
+#     as_of: Annotated[str, typer.Option()],
+# ) -> None:
+#     """Provide a preview of recommendation"""
+
+#     try:
+#         as_of_date = date.fromisoformat(as_of)
+#     except ValueError as error:
+#         raise typer.BadParameter(
+#             "Use ISO format YYYY-MM-DD.",
+#             param_hint="--as-of",
+#         ) from error
+
+#     settings = get_settings()
+#     transactions = load_portfolio_transactions_csv(
+#         source,
+#         run_id=run_id,
+#         ingested_at=datetime.now(UTC),
+#     )
+#     positions = calculate_positions(transactions)
+
+#     if not positions:
+#         typer.echo("No active positions.")
+#         return
+
+#     connection = connect(settings.database_path)
+
+#     try:
+#         register_daily_prices_view(
+#             connection,
+#             settings.data_dir / "daily_prices",
+#         )
+#         valuations = value_positions(
+#             connection,
+#             positions,
+#             as_of=as_of_date,
+#             max_price_age_days=max_price_age_days,
+#         )
+#     except duckdb.IOException as error:
+#         raise typer.BadParameter(
+#             "No canonical daily-price Parquet data exists yet. "
+#             "Run stage-bhavcopy first."
+#         ) from error
+#     except ValueError as error:
+#         raise typer.BadParameter(str(error)) from error
+#     finally:
+#         connection.close()
+
+#     for valuation in valuations:
+#         typer.echo(
+#             " | ".join(
+#                 [
+#                     valuation.account_id,
+#                     valuation.exchange,
+#                     valuation.symbol,
+#                     str(valuation.quantity),
+#                     valuation.price_date.isoformat(),
+#                     str(valuation.close_price),
+#                     str(valuation.market_value),
+#                 ]
+#             )
+#         )
+
+#     total_market_value = sum(
+#         (valuation.market_value for valuation in valuations),
+#         start=Decimal(0),
+#     )
+#     typer.echo(f"Total market value | {total_market_value}")
 
 
 @app.command()
