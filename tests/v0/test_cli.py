@@ -1,4 +1,8 @@
+# tests/v0/test_cli.py
+
+import gzip
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -6,6 +10,40 @@ from core.cli import app
 from core.config.settings import get_settings
 
 runner = CliRunner()
+
+
+def configure_test_settings(monkeypatch, tmp_path: Path) -> Path:
+    data_dir = tmp_path / "data"
+
+    monkeypatch.setattr(
+        "core.cli.get_settings",
+        lambda: SimpleNamespace(
+            data_dir=data_dir,
+            database_path=tmp_path / "qdp.duckdb",
+        ),
+    )
+
+    return data_dir
+
+
+def write_historical_source_file(path: Path) -> None:
+    with gzip.open(path, mode="wt", encoding="utf-8", newline="") as file:
+        file.write(
+            "Date,Open,High,Low,Close,Volume,Dividends,Stock Splits\n"
+            "2024-01-02 00:00:00+05:30,"
+            "2500.00,2530.00,2490.00,2515.00,1000,0.0,0.0\n"
+        )
+
+
+def write_bhavcopy_source_file(path: Path) -> None:
+    with gzip.open(path, mode="wt", encoding="utf-8", newline="") as file:
+        file.write(
+            "SYMBOL,SERIES,DATE1,PREV_CLOSE,OPEN_PRICE,HIGH_PRICE,"
+            "LOW_PRICE,LAST_PRICE,CLOSE_PRICE,AVG_PRICE,TTL_TRD_QNTY,"
+            "TURNOVER_LACS,NO_OF_TRADES,DELIV_QTY,DELIV_PER\n"
+            "RELIANCE,EQ,01-Mar-2024,2900.00,2900.00,2930.00,2890.00,"
+            "2915.40,2915.40,2910.00,1000,29.10,50,600,60.00\n"
+        )
 
 
 def test_load_and_query_sample_prices(tmp_path: Path, monkeypatch) -> None:
@@ -27,3 +65,108 @@ def test_load_and_query_sample_prices(tmp_path: Path, monkeypatch) -> None:
     assert "TCS" not in query_result.output
 
     get_settings.cache_clear()
+
+
+def test_load_csv_writes_parquet_via_cli(tmp_path: Path, monkeypatch) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    source = tmp_path / "daily_prices.csv"
+    source.write_text(
+        "exchange,symbol,trade_date,open_price,high_price,low_price,"
+        "close_price,volume_qty,source_name,source_file,ingested_at,"
+        "run_id,dataset_version\n"
+        "NSE,reliance,2026-01-02,1400.00,1425.00,1390.00,1415.00,"
+        "1000000,test_source,prices.csv,2026-01-02T12:00:00+00:00,"
+        "test-run,test-v1\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["load-csv", str(source)])
+
+    assert result.exit_code == 0, result.output
+    assert "Wrote" in result.output
+    assert len(list((data_dir / "daily_prices").rglob("*.parquet"))) == 1
+
+
+def test_inventory_historical_writes_report_via_cli(tmp_path: Path) -> None:
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+    write_historical_source_file(source_directory / "RELIANCE.NS.csv.gz")
+
+    output_path = tmp_path / "reports" / "inventory.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "inventory-historical",
+            str(source_directory),
+            "--run-id",
+            "test-run",
+            "--dataset-version",
+            "kaggle-2023-11",
+            "--output-path",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Files discovered: 1" in result.output
+    assert "Files processed: 1" in result.output
+    assert output_path.exists()
+
+
+def test_stage_historical_stages_data_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+    write_historical_source_file(source_directory / "RELIANCE.NS.csv.gz")
+
+    result = runner.invoke(
+        app,
+        [
+            "stage-historical",
+            str(source_directory),
+            "--run-id",
+            "test-run",
+            "--dataset-version",
+            "kaggle-2023-11",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Files discovered: 1" in result.output
+    assert "Files processed: 1" in result.output
+    assert len(list(data_dir.rglob("*.parquet"))) == 1
+
+
+def test_stage_bhavcopy_stages_prices_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+    write_bhavcopy_source_file(source_directory / "sec_bhavdata_full_01032024.csv.gz")
+
+    result = runner.invoke(
+        app,
+        [
+            "stage-bhavcopy",
+            str(source_directory),
+            "--run-id",
+            "test-run",
+            "--dataset-version",
+            "nse-bhavcopy-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Files discovered: 1" in result.output
+    assert "Files processed: 1" in result.output
+    assert len(list((data_dir / "daily_prices").rglob("*.parquet"))) == 1

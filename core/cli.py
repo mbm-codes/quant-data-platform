@@ -9,20 +9,18 @@ import duckdb
 import typer
 
 from core.config.settings import get_settings
-from core.data.daily_prices import load_daily_prices_csv
 from core.data.duckdb import connect, register_daily_prices_view
 from core.data.kaggle_inventory import (
     inventory_kaggle_historical_directory,
     write_historical_source_inventory,
 )
-from core.data.kaggle_staging import stage_kaggle_historical_directory
-from core.data.nse_bhavcopy_staging import stage_nse_bhavcopy_directory
-from core.data.parquet import write_daily_prices_parquet
-from core.data.transactions import load_portfolio_transactions_csv
-from core.portfolio import calculate_positions
-from core.valuation import value_positions
 
+from core.data.nse_bhavcopy_staging import stage_nse_bhavcopy_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
+from core.services.csv_loader import load_csv as load_csv_service
+from core.services.historical_inventory import inventory_historical as inventory_historical_service
+from core.services.historical_staging import stage_kaggle_historical_directory
+from core.services.bhavcopy_staging import stage_bhavcopy as stage_bhavcopy_service
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -34,11 +32,9 @@ def load_csv(
     """Validate a CSV file and write it as a canonical parquet."""
 
     settings = get_settings()
-    records = load_daily_prices_csv(source)
-
-    written_paths = write_daily_prices_parquet(
-        records,
-        settings.data_dir / "daily_prices",
+    written_paths = load_csv_service(
+        source=source,
+        daily_prices_directory=settings.data_dir / "daily_prices",
     )
 
     for written_path in written_paths:
@@ -59,14 +55,13 @@ def inventory_historical(
 ) -> None:
     """Validate and inventory Kaggle historical source files."""
 
-    inventory = inventory_kaggle_historical_directory(
-        source_directory,
+    inventory = inventory_historical_service(
+        source_directory=source_directory,
         run_id=run_id,
         dataset_version=dataset_version,
+        output_path=output_path,
         ingested_at=datetime.now(UTC),
     )
-
-    write_historical_source_inventory(inventory, output_path)
     report = inventory.to_dict()
 
     typer.echo(f"Files discovered: {report['files_discovered']}")
@@ -117,8 +112,7 @@ def stage_bhavcopy(
 ) -> None:
     """Stage official NSE bhavcopy files as canonical daily prices."""
     settings = get_settings()
-
-    result = stage_nse_bhavcopy_directory(
+    result = stage_bhavcopy_service(
         source_directory,
         settings.data_dir / "daily_prices",
         run_id=run_id,
