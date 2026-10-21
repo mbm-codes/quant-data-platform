@@ -10,17 +10,13 @@ import typer
 
 from core.config.settings import get_settings
 from core.data.duckdb import connect, register_daily_prices_view
-from core.data.kaggle_inventory import (
-    inventory_kaggle_historical_directory,
-    write_historical_source_inventory,
-)
-
-from core.data.nse_bhavcopy_staging import stage_nse_bhavcopy_directory
-from core.services.portfolio import get_portfolio_positions, value_portfolio
-from core.services.csv_loader import load_csv as load_csv_service
-from core.services.historical_inventory import inventory_historical as inventory_historical_service
-from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.bhavcopy_staging import stage_bhavcopy as stage_bhavcopy_service
+from core.services.csv_loader import load_csv as load_csv_service
+from core.services.historical_inventory import (
+    inventory_historical as inventory_historical_service,
+)
+from core.services.historical_staging import stage_kaggle_historical_directory
+from core.services.portfolio import get_portfolio_positions, value_portfolio
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -135,11 +131,9 @@ def portfolio_positions(
     """Calculate active portfolio positions from transaction events."""
 
     positions = get_portfolio_positions(
-        source=source,
-        run_id=run_id,
-        ingested_at=datetime.now(UTC)
+        source=source, run_id=run_id, ingested_at=datetime.now(UTC)
     )
-    
+
     if not positions:
         typer.echo("No active positions.")
         return
@@ -175,7 +169,7 @@ def portfolio_value(
         ) from error
 
     settings = get_settings()
-  
+
     try:
         valuations = value_portfolio(
             source,
@@ -190,7 +184,7 @@ def portfolio_value(
         if not valuations:
             typer.echo("No active positions.")
             return
-        
+
     except duckdb.IOException as error:
         raise typer.BadParameter(
             "No canonical daily-price Parquet data exists yet. "
@@ -219,6 +213,7 @@ def portfolio_value(
         start=Decimal(0),
     )
     typer.echo(f"Total market value | {total_market_value}")
+
 
 # @app.command("recommendation-preview")
 # def recommendation_preview(
