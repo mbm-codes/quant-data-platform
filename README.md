@@ -173,3 +173,42 @@ data version used to produce it.
 The ledger is written as append-only Parquet, partitioned by recommendation
 as-of year. Reusing an existing recommendation ID is rejected rather than
 overwriting prior advice.
+
+## Momentum recommendation preview
+
+Generate a read-only recommendation using the 20-session momentum baseline:
+
+```bash
+uv run python -m core.cli recommendation-preview RELIANCE \
+  --account-id main \
+  --run-id preview-001 \
+  --input-dataset-version nse-bhavcopy-v1 \
+  --as-of 2026-01-20
+```
+
+`--as-of` is optional. If omitted, the preview uses the latest available price
+on or before the current date in India.
+
+### How it works
+
+The strategy requires at least **21 closing-price observations** for the symbol.
+It compares the latest close with the close 20 observations earlier:
+
+```text
+momentum return = (latest close / earlier close) - 1
+```
+
+| Momentum return | Action |
+| --- | --- |
+| At least +2% | BUY |
+| Between -2% and +2% | HOLD |
+| At most -2% | SELL |
+
+The score ranges from 0 to 1 and represents normalized signal strength—not
+prediction confidence. Prices older than seven calendar days relative to the
+evaluation date are rejected.
+
+The command only previews the recommendation; it does **not** write to the
+recommendation ledger. The baseline uses observed raw closing prices and does
+not account for corporate actions. It is an educational baseline, not investment
+advice.

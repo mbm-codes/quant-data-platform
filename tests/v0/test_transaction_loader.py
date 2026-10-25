@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.data.transactions import load_portfolio_transactions_csv
-from core.services.portfolio import get_portfolio_positions
 
 
 def test_service_loads_transactions_calculates_positions(tmp_path: Path) -> None:
