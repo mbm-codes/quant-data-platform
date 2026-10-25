@@ -1,6 +1,8 @@
 # tests/v0/test_cli.py
 
 import gzip
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +10,8 @@ from typer.testing import CliRunner
 
 from core.cli import app
 from core.config.settings import get_settings
+from core.data.parquet import write_daily_prices_parquet
+from core.models.daily_prices import DailyPrice
 
 runner = CliRunner()
 
@@ -170,3 +174,78 @@ def test_stage_bhavcopy_stages_prices_via_cli(
     assert "Files discovered: 1" in result.output
     assert "Files processed: 1" in result.output
     assert len(list((data_dir / "daily_prices").rglob("*.parquet"))) == 1
+
+
+def test_recommendation_preview_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    daily_prices_directory = data_dir / "daily_prices"
+
+    close_values = [Decimal(100)] + [Decimal(101)] * 19 + [Decimal(121)]
+    start_date = date(2024, 1, 1)
+
+    prices = [
+        DailyPrice(
+            exchange="NSE",
+            symbol="RELIANCE",
+            trade_date=start_date + timedelta(days=index),
+            open_price=close_price,
+            high_price=close_price + Decimal(1),
+            low_price=close_price - Decimal(1),
+            close_price=close_price,
+            volume_qty=1_000,
+            source_name="test-source",
+            source_file="prices.csv",
+            source_hash="test-source-hash",
+            ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+            run_id="test-run",
+            dataset_version="test-v1",
+        )
+        for index, close_price in enumerate(close_values)
+    ]
+
+    write_daily_prices_parquet(prices, daily_prices_directory)
+
+    result = runner.invoke(
+        app,
+        [
+            "recommendation-preview",
+            "reliance",
+            "--account-id",
+            "main",
+            "--run-id",
+            "test-run",
+            "--input-dataset-version",
+            "test-v1",
+            "--as-of",
+            "2024-01-21",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "main | NSE | RELIANCE | BUY" in result.output
+    assert "2024-01-21" in result.output
+    assert "121.00000000" in result.output
+
+
+def test_recommendation_preview_rejects_invalid_as_of() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "recommendation-preview",
+            "reliance",
+            "--account-id",
+            "main",
+            "--run-id",
+            "test-run",
+            "--input-dataset-version",
+            "test-v1",
+            "--as-of",
+            "not-a-date",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Use ISO format YYYY-MM-DD." in result.output

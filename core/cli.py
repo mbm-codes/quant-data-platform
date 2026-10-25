@@ -17,6 +17,9 @@ from core.services.historical_inventory import (
 )
 from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
+from core.services.recommendation import (
+    preview_momentum_recommendation as preview_momentum_recommendation_service,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -215,77 +218,59 @@ def portfolio_value(
     typer.echo(f"Total market value | {total_market_value}")
 
 
-# @app.command("recommendation-preview")
-# def recommendation_preview(
-#     symbol: Annotated[str, typer.Argument(exists=True)],
-#     account_id: Annotated[str, typer.Argument(exists=True)],
-#     as_of: Annotated[str, typer.Option()],
-# ) -> None:
-#     """Provide a preview of recommendation"""
+@app.command("recommendation-preview")
+def recommendation_preview(
+    symbol: Annotated[str, typer.Argument()],
+    account_id: Annotated[str, typer.Option()],
+    run_id: Annotated[str, typer.Option()],
+    as_of: Annotated[str | None, typer.Option()] = None,
+    input_dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+) -> None:
+    """Provide a preview of recommendation"""
 
-#     try:
-#         as_of_date = date.fromisoformat(as_of)
-#     except ValueError as error:
-#         raise typer.BadParameter(
-#             "Use ISO format YYYY-MM-DD.",
-#             param_hint="--as-of",
-#         ) from error
+    as_of_date = None
+    if as_of is not None:
+        try:
+            as_of_date = date.fromisoformat(as_of)
+        except ValueError as error:
+            raise typer.BadParameter(
+                "Use ISO format YYYY-MM-DD.",
+                param_hint="--as-of",
+            ) from error
 
-#     settings = get_settings()
-#     transactions = load_portfolio_transactions_csv(
-#         source,
-#         run_id=run_id,
-#         ingested_at=datetime.now(UTC),
-#     )
-#     positions = calculate_positions(transactions)
+    settings = get_settings()
+    try:
+        recommendation = preview_momentum_recommendation_service(
+            account_id=account_id,
+            symbol=symbol,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            as_of=as_of_date,
+            generated_at=datetime.now(UTC),
+            input_dataset_version=input_dataset_version,
+            run_id=run_id,
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "No canonical daily-price Parquet data exists yet. "
+            "Run stage-bhavcopy first."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
 
-#     if not positions:
-#         typer.echo("No active positions.")
-#         return
-
-#     connection = connect(settings.database_path)
-
-#     try:
-#         register_daily_prices_view(
-#             connection,
-#             settings.data_dir / "daily_prices",
-#         )
-#         valuations = value_positions(
-#             connection,
-#             positions,
-#             as_of=as_of_date,
-#             max_price_age_days=max_price_age_days,
-#         )
-#     except duckdb.IOException as error:
-#         raise typer.BadParameter(
-#             "No canonical daily-price Parquet data exists yet. "
-#             "Run stage-bhavcopy first."
-#         ) from error
-#     except ValueError as error:
-#         raise typer.BadParameter(str(error)) from error
-#     finally:
-#         connection.close()
-
-#     for valuation in valuations:
-#         typer.echo(
-#             " | ".join(
-#                 [
-#                     valuation.account_id,
-#                     valuation.exchange,
-#                     valuation.symbol,
-#                     str(valuation.quantity),
-#                     valuation.price_date.isoformat(),
-#                     str(valuation.close_price),
-#                     str(valuation.market_value),
-#                 ]
-#             )
-#         )
-
-#     total_market_value = sum(
-#         (valuation.market_value for valuation in valuations),
-#         start=Decimal(0),
-#     )
-#     typer.echo(f"Total market value | {total_market_value}")
+    typer.echo(
+        " | ".join(
+            [
+                recommendation.account_id,
+                "NSE",
+                recommendation.symbol,
+                recommendation.action,
+                recommendation.price_date.isoformat(),
+                str(recommendation.reference_price),
+                str(recommendation.score),
+            ]
+        )
+    )
 
 
 @app.command()
