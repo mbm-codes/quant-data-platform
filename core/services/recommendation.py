@@ -47,6 +47,7 @@ def preview_momentum_recommendation(
             connection=connection,
             exchange="NSE",
             symbol=symbol,
+            dataset_version=input_dataset_version,
             as_of=evaluation_date,
         )
 
@@ -69,8 +70,8 @@ def preview_momentum_recommendation(
         normalized_symbol = symbol.strip().upper()
         effective_as_of = as_of if as_of is not None else price_date
         recommendation_id = (
-            f"baseline_momentum:v1:{account_id}:"
-            f"{normalized_symbol}:{effective_as_of.isoformat()}"
+            f"baseline_momentum:v1:{account_id}:NSE:"
+            f"{normalized_symbol}:{effective_as_of.isoformat()}:{run_id}"
         )
 
         return PortfolioRecommendation(

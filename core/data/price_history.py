@@ -11,6 +11,7 @@ def load_recent_closes(
     *,
     exchange: str,
     symbol: str,
+    dataset_version: str,
     as_of: date | None,
     limit: int = 21,
 ) -> list[tuple[date, Decimal]]:
@@ -21,10 +22,12 @@ def load_recent_closes(
         FROM daily_prices
         WHERE exchange = ?
             AND symbol = ?
+            AND dataset_version = ?
     """
     parameters: list[object] = [
         exchange.strip().upper(),
         symbol.strip().upper(),
+        dataset_version,
     ]
 
     if as_of is not None:

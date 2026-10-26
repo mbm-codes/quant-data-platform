@@ -65,7 +65,7 @@ def test_momentum_recommendation(tmp_path: Path) -> None:
     )
 
     assert recommendation.recommendation_id == (
-        "baseline_momentum:v1:test-account:RELIANCE:2024-01-21"
+        "baseline_momentum:v1:test-account:NSE:RELIANCE:2024-01-21:test-run"
     )
     assert recommendation.symbol == "RELIANCE"
     assert recommendation.action == "BUY"
@@ -76,6 +76,7 @@ def test_momentum_recommendation(tmp_path: Path) -> None:
     assert recommendation.strategy_name == "baseline_momentum"
     assert recommendation.strategy_version == "v1"
     assert "21.00%" in recommendation.rationale
+    assert recommendation.input_dataset_version == "test-v1"
 
 
 def test_momentum_recommendation_22_days(tmp_path: Path) -> None:
@@ -104,7 +105,7 @@ def test_momentum_recommendation_22_days(tmp_path: Path) -> None:
     )
 
     assert recommendation.recommendation_id == (
-        "baseline_momentum:v1:test-account:RELIANCE:2024-01-21"
+        "baseline_momentum:v1:test-account:NSE:RELIANCE:2024-01-21:test-run"
     )
     assert recommendation.symbol == "RELIANCE"
     assert recommendation.action == "BUY"
@@ -181,6 +182,29 @@ def test_recommendation_rejects_stale_price(
             run_id="test-run",
             generated_at=datetime(2024, 2, 1, tzinfo=UTC),
             input_dataset_version="test-v1",
+            database_path=tmp_path / "qdp.duckdb",
+            daily_prices_directory=daily_prices_directory,
+        )
+
+def test_recommendation_rejects_unknown_dataset_version(
+    tmp_path: Path,
+) -> None:
+    daily_prices_directory = tmp_path / "daily_prices"
+    close_values = (
+        [Decimal("100")]
+        + [Decimal("101")] * 19
+        + [Decimal("121")]
+    )
+    write_price_history(daily_prices_directory, close_values)
+
+    with pytest.raises(ValueError, match="21"):
+        preview_momentum_recommendation(
+            account_id="test-account",
+            symbol="RELIANCE",
+            as_of=date(2024, 1, 21),
+            run_id="test-run",
+            generated_at=datetime(2024, 1, 22, tzinfo=UTC),
+            input_dataset_version="unknown-version",
             database_path=tmp_path / "qdp.duckdb",
             daily_prices_directory=daily_prices_directory,
         )

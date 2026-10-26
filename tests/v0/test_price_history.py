@@ -50,6 +50,7 @@ def test_load_recent_closes_returns_latest_twenty_one_in_order(
     write_price_history(daily_prices_directory)
 
     connection = connect(tmp_path / "qdp.duckdb")
+
     try:
         register_daily_prices_view(connection, daily_prices_directory)
 
@@ -57,6 +58,7 @@ def test_load_recent_closes_returns_latest_twenty_one_in_order(
             connection,
             exchange="NSE",
             symbol="reliance",
+            dataset_version="test-v1",
             as_of=None,
         )
     finally:
@@ -79,6 +81,7 @@ def test_load_recent_closes_respects_as_of_date(tmp_path: Path) -> None:
             connection,
             exchange="NSE",
             symbol="RELIANCE",
+            dataset_version="test-v1",
             as_of=date(2024, 1, 15),
         )
     finally:
@@ -87,3 +90,62 @@ def test_load_recent_closes_respects_as_of_date(tmp_path: Path) -> None:
     assert len(closes) == 15
     assert closes[0] == (date(2024, 1, 1), Decimal("100.00000000"))
     assert closes[-1] == (date(2024, 1, 15), Decimal("114.00000000"))
+
+
+def test_load_recent_closes_filters_by_dataset_version(tmp_path: Path) -> None:
+    daily_prices_directory = tmp_path / "daily_prices"
+    trade_date = date(2024, 1, 2)
+
+    price_v1 = DailyPrice.model_validate(
+        {
+            **make_price(trade_date, Decimal("100")).model_dump(),
+            "dataset_version": "test-v1",
+            "source_file": "prices-v1.csv",
+            "source_hash": "v1-hash",
+        }
+    )
+    price_v2 = DailyPrice.model_validate(
+        {
+            **make_price(trade_date, Decimal("200")).model_dump(),
+            "dataset_version": "test-v2",
+            "source_file": "prices-v2.csv",
+            "source_hash": "v2-hash",
+        }
+    )
+
+    # Write separately: both versions intentionally share a business key.
+    write_daily_prices_parquet([price_v1], daily_prices_directory)
+    write_daily_prices_parquet([price_v2], daily_prices_directory)
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    try:
+        register_daily_prices_view(connection, daily_prices_directory)
+
+        closes_v1 = load_recent_closes(
+            connection,
+            exchange="NSE",
+            symbol="RELIANCE",
+            dataset_version="test-v1",
+            as_of=None,
+        )
+        closes_v2 = load_recent_closes(
+            connection,
+            exchange="NSE",
+            symbol="RELIANCE",
+            dataset_version="test-v2",
+            as_of=None,
+        )
+
+        unknown_version = load_recent_closes(
+            connection,
+            exchange="NSE",
+            symbol="RELIANCE",
+            dataset_version="unknown",
+            as_of=None,
+        )
+    finally:
+        connection.close()
+
+    assert closes_v1 == [(trade_date, Decimal("100"))]
+    assert closes_v2 == [(trade_date, Decimal("200"))]
+    assert unknown_version == []

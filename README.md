@@ -212,3 +212,22 @@ The command only previews the recommendation; it does **not** write to the
 recommendation ledger. The baseline uses observed raw closing prices and does
 not account for corporate actions. It is an educational baseline, not investment
 advice.
+
+### Record a recommendation
+
+Generate a fresh momentum recommendation and write it to the local ledger:
+
+```bash
+uv run python -m core.cli recommendation-record RELIANCE \
+  --account-id main \
+  --run-id example-run-001 \
+  --input-dataset-version nse-bhavcopy-v1 \
+  --as-of 2026-01-20
+```
+
+The command recalculates the signal; it does not save an earlier preview.
+Use a new run ID for a new run. Re-recording the same recommendation ID is
+rejected rather than overwritten.
+
+Only prices matching the requested dataset version are selected. A dataset
+version is a label, not a guarantee that the underlying files are immutable.
