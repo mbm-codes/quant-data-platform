@@ -20,6 +20,9 @@ from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.recommendation import (
     preview_momentum_recommendation as preview_momentum_recommendation_service,
 )
+from core.services.recommendation_recording import (
+    generate_and_record_momentum_recommendation,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -271,6 +274,64 @@ def recommendation_preview(
             ]
         )
     )
+
+
+@app.command("recommendation-record")
+def recommendation_record(
+    symbol: Annotated[str, typer.Argument()],
+    account_id: Annotated[str, typer.Option()],
+    run_id: Annotated[str, typer.Option()],
+    as_of: Annotated[str | None, typer.Option()] = None,
+    input_dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+) -> None:
+    """Generate and record a momentum recommendation."""
+    as_of_date = None
+
+    if as_of is not None:
+        try:
+            as_of_date = date.fromisoformat(as_of)
+        except ValueError as error:
+            raise typer.BadParameter(
+                "Use ISO format YYYY-MM-DD.",
+                param_hint="--as-of",
+            ) from error
+
+    settings = get_settings()
+
+    try:
+        recommendation, written_path = generate_and_record_momentum_recommendation(
+            account_id=account_id,
+            symbol=symbol,
+            as_of=as_of_date,
+            run_id=run_id,
+            generated_at=datetime.now(UTC),
+            input_dataset_version=input_dataset_version,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            ledger_directory=settings.data_dir / "recommendations",
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            f"Unable to access DuckDB or daily-price data: {error}"
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(
+        " | ".join(
+            [
+                recommendation.account_id,
+                recommendation.exchange,
+                recommendation.symbol,
+                recommendation.action,
+                recommendation.price_date.isoformat(),
+                str(recommendation.reference_price),
+                str(recommendation.score),
+            ]
+        )
+    )
+    typer.echo(f"Recommendation ID | {recommendation.recommendation_id}")
+    typer.echo(f"Recorded recommendation | {written_path}")
 
 
 @app.command()

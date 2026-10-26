@@ -1,6 +1,8 @@
 # tests/v0/test_cli.py
 
 import gzip
+import pyarrow.parquet as pq
+
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -28,6 +30,33 @@ def configure_test_settings(monkeypatch, tmp_path: Path) -> Path:
     )
 
     return data_dir
+
+
+def write_recording_test_prices(output_directory: Path) -> None:
+    start_date = date(2024, 1, 1)
+    close_values = [Decimal("100")] + [Decimal("101")] * 19 + [Decimal("121")]
+
+    prices = [
+        DailyPrice(
+            exchange="NSE",
+            symbol="RELIANCE",
+            trade_date=start_date + timedelta(days=index),
+            open_price=close_price,
+            high_price=close_price + Decimal("1"),
+            low_price=close_price - Decimal("1"),
+            close_price=close_price,
+            volume_qty=1_000,
+            source_name="test-source",
+            source_file="prices.csv",
+            source_hash="test-source-hash",
+            ingested_at=datetime(2024, 1, 22, tzinfo=UTC),
+            run_id="price-run",
+            dataset_version="test-v1",
+        )
+        for index, close_price in enumerate(close_values)
+    ]
+
+    write_daily_prices_parquet(prices, output_directory)
 
 
 def write_historical_source_file(path: Path) -> None:
@@ -249,3 +278,75 @@ def test_recommendation_preview_rejects_invalid_as_of() -> None:
 
     assert result.exit_code != 0
     assert "Use ISO format YYYY-MM-DD." in result.output
+
+
+def test_recommendation_record_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    write_recording_test_prices(data_dir / "daily_prices")
+
+    result = runner.invoke(
+        app,
+        [
+            "recommendation-record",
+            "reliance",
+            "--account-id",
+            "main",
+            "--run-id",
+            "test-run",
+            "--input-dataset-version",
+            "test-v1",
+            "--as-of",
+            "2024-01-21",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "main | NSE | RELIANCE | BUY" in result.output
+    assert "Recorded recommendation |" in result.output
+
+    ledger_paths = list((data_dir / "recommendations").rglob("*.parquet"))
+    assert len(ledger_paths) == 1
+
+    records = pq.read_table(ledger_paths[0]).to_pylist()
+    assert records[0]["symbol"] == "RELIANCE"
+    assert records[0]["action"] == "BUY"
+    assert records[0]["run_id"] == "test-run"
+    assert records[0]["recommendation_id"] in result.output
+
+
+def test_recommendation_record_rejects_duplicate_run(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    write_recording_test_prices(data_dir / "daily_prices")
+
+    arguments = [
+        "recommendation-record",
+        "RELIANCE",
+        "--account-id",
+        "main",
+        "--run-id",
+        "test-run",
+        "--input-dataset-version",
+        "test-v1",
+        "--as-of",
+        "2024-01-21",
+    ]
+
+    first_result = runner.invoke(app, arguments)
+    assert first_result.exit_code == 0, first_result.output
+
+    ledger_paths = list((data_dir / "recommendations").rglob("*.parquet"))
+    assert len(ledger_paths) == 1
+    original_bytes = ledger_paths[0].read_bytes()
+
+    second_result = runner.invoke(app, arguments)
+
+    assert second_result.exit_code != 0
+    assert "already exists" in second_result.output
+    assert ledger_paths[0].read_bytes() == original_bytes
+    assert len(list((data_dir / "recommendations").rglob("*.parquet"))) == 1
