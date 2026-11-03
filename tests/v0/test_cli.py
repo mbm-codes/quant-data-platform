@@ -1,19 +1,20 @@
 # tests/v0/test_cli.py
 
 import gzip
-import pyarrow.parquet as pq
-
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pyarrow.parquet as pq
 from typer.testing import CliRunner
 
 from core.cli import app
 from core.config.settings import get_settings
 from core.data.parquet import write_daily_prices_parquet
+from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
+from core.models.recommendations import PortfolioRecommendation
 
 runner = CliRunner()
 
@@ -34,7 +35,7 @@ def configure_test_settings(monkeypatch, tmp_path: Path) -> Path:
 
 def write_recording_test_prices(output_directory: Path) -> None:
     start_date = date(2024, 1, 1)
-    close_values = [Decimal("100")] + [Decimal("101")] * 19 + [Decimal("121")]
+    close_values = [Decimal(100)] + [Decimal(101)] * 19 + [Decimal(121)]
 
     prices = [
         DailyPrice(
@@ -42,8 +43,8 @@ def write_recording_test_prices(output_directory: Path) -> None:
             symbol="RELIANCE",
             trade_date=start_date + timedelta(days=index),
             open_price=close_price,
-            high_price=close_price + Decimal("1"),
-            low_price=close_price - Decimal("1"),
+            high_price=close_price + Decimal(1),
+            low_price=close_price - Decimal(1),
             close_price=close_price,
             volume_qty=1_000,
             source_name="test-source",
@@ -350,3 +351,141 @@ def test_recommendation_record_rejects_duplicate_run(
     assert "already exists" in second_result.output
     assert ledger_paths[0].read_bytes() == original_bytes
     assert len(list((data_dir / "recommendations").rglob("*.parquet"))) == 1
+
+
+def test_recommendation_evaluate_prints_pending_when_no_future_prices_exist(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    recommendation = PortfolioRecommendation(
+        recommendation_id="rec-001",
+        account_id="main",
+        exchange="NSE",
+        symbol="RELIANCE",
+        action="BUY",
+        as_of_date=date(2024, 1, 1),
+        price_date=date(2024, 1, 1),
+        reference_price=Decimal(100),
+        score=Decimal("0.75"),
+        rationale="Test recommendation.",
+        strategy_name="baseline_momentum",
+        strategy_version="v1",
+        generated_at=datetime(2024, 1, 1, tzinfo=UTC),
+        run_id="test-run",
+        input_dataset_version="test-v1",
+    )
+    write_recommendation_ledger(
+        [recommendation],
+        data_dir / "recommendations",
+    )
+
+    reference_price = DailyPrice(
+        exchange="NSE",
+        symbol="RELIANCE",
+        trade_date=date(2024, 1, 1),
+        open_price=Decimal(100),
+        high_price=Decimal(100),
+        low_price=Decimal(100),
+        close_price=Decimal(100),
+        volume_qty=1_000,
+        source_name="test-source",
+        source_file="prices.csv",
+        source_hash="test-source-hash",
+        ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+        run_id="test-run",
+        dataset_version="test-v1",
+    )
+    write_daily_prices_parquet(
+        [reference_price],
+        data_dir / "daily_prices",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "recommendation-evaluate",
+            "rec-001",
+            "--as-of",
+            "2024-02-01",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Recommendation ID | rec-001" in result.output
+    assert "Evaluation status | PENDING" in result.output
+    assert "Future observations | 0" in result.output
+    assert not list((data_dir / "recommendation_evaluations").rglob("*.parquet"))
+
+
+def test_recommendation_evaluate_records_completed_evaluation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    recommendation = PortfolioRecommendation(
+        recommendation_id="rec-001",
+        account_id="main",
+        exchange="NSE",
+        symbol="RELIANCE",
+        action="BUY",
+        as_of_date=date(2024, 1, 1),
+        price_date=date(2024, 1, 1),
+        reference_price=Decimal(100),
+        score=Decimal("0.75"),
+        rationale="Test recommendation.",
+        strategy_name="baseline_momentum",
+        strategy_version="v1",
+        generated_at=datetime(2024, 1, 1, tzinfo=UTC),
+        run_id="test-run",
+        input_dataset_version="test-v1",
+    )
+    write_recommendation_ledger(
+        [recommendation],
+        data_dir / "recommendations",
+    )
+
+    future_prices = [
+        DailyPrice(
+            exchange="NSE",
+            symbol="RELIANCE",
+            trade_date=date(2024, 1, 1) + timedelta(days=index),
+            open_price=Decimal(110),
+            high_price=Decimal(110),
+            low_price=Decimal(110),
+            close_price=Decimal(110),
+            volume_qty=1_000,
+            source_name="test-source",
+            source_file="prices.csv",
+            source_hash="test-source-hash",
+            ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+            run_id="test-run",
+            dataset_version="test-v1",
+        )
+        for index in range(1, 21)
+    ]
+    write_daily_prices_parquet(
+        future_prices,
+        data_dir / "daily_prices",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "recommendation-evaluate",
+            "rec-001",
+            "--as-of",
+            "2024-01-21",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Evaluation status | COMPLETED" in result.output
+    assert "Future observations | 20" in result.output
+    assert "Future price date | 2024-01-21" in result.output
+    assert "Future close price | 110.00000000" in result.output
+    assert "Forward return | 10.00%" in result.output
+    assert "Recorded evaluation |" in result.output
+    assert len(list((data_dir / "recommendation_evaluations").rglob("*.parquet"))) == 1

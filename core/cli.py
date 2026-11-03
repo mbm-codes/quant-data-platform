@@ -20,6 +20,9 @@ from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.recommendation import (
     preview_momentum_recommendation as preview_momentum_recommendation_service,
 )
+from core.services.recommendation_evaluation_recording import (
+    evaluate_and_record_recommendation_by_id,
+)
 from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
@@ -332,6 +335,54 @@ def recommendation_record(
     )
     typer.echo(f"Recommendation ID | {recommendation.recommendation_id}")
     typer.echo(f"Recorded recommendation | {written_path}")
+
+
+@app.command("recommendation-evaluate")
+def recommendation_evaluate(
+    recommendation_id: Annotated[str, typer.Argument()],
+    as_of: Annotated[str, typer.Option()],
+) -> None:
+    """Evaluate one recorded recommendation using future daily prices."""
+    try:
+        evaluation_as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    settings = get_settings()
+
+    try:
+        evaluation, written_path = evaluate_and_record_recommendation_by_id(
+            recommendation_id,
+            evaluation_as_of_date=evaluation_as_of_date,
+            database_path=settings.database_path,
+            recommendations_directory=settings.data_dir / "recommendations",
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            evaluation_ledger_directory=(
+                settings.data_dir / "recommendation_evaluations"
+            ),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Required recommendation or daily-price Parquet data does not exist."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Recommendation ID | {evaluation.recommendation_id}")
+    typer.echo(f"Evaluation status | {evaluation.status}")
+    typer.echo(f"Future observations | {evaluation.future_observations_found}")
+
+    if evaluation.status == "PENDING":
+        typer.echo(f"Evaluation cutoff | {evaluation.evaluation_as_of_date}")
+        return
+
+    typer.echo(f"Future price date | {evaluation.future_price_date}")
+    typer.echo(f"Future close price | {evaluation.future_close_price}")
+    typer.echo(f"Forward return | {evaluation.forward_return:.2%}")
+    typer.echo(f"Recorded evaluation | {written_path}")
 
 
 @app.command()

@@ -186,15 +186,12 @@ def test_recommendation_rejects_stale_price(
             daily_prices_directory=daily_prices_directory,
         )
 
+
 def test_recommendation_rejects_unknown_dataset_version(
     tmp_path: Path,
 ) -> None:
     daily_prices_directory = tmp_path / "daily_prices"
-    close_values = (
-        [Decimal("100")]
-        + [Decimal("101")] * 19
-        + [Decimal("121")]
-    )
+    close_values = [Decimal(100)] + [Decimal(101)] * 19 + [Decimal(121)]
     write_price_history(daily_prices_directory, close_values)
 
     with pytest.raises(ValueError, match="21"):

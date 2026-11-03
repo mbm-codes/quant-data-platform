@@ -7,6 +7,7 @@ dependencies = [
     "pyarrow>=25.0.1",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
+    "pytz>=2026.5",
     "typer>=0.27.2",
 ]
 
