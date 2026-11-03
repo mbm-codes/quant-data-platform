@@ -5,13 +5,13 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
-from core.models.recommendations import PortfolioRecommendation
-from core.services.recommendation_recording import (
-    record_recommendation,
-    generate_and_record_momentum_recommendation,
-)
 from core.data.parquet import write_daily_prices_parquet
 from core.models.daily_prices import DailyPrice
+from core.models.recommendations import PortfolioRecommendation
+from core.services.recommendation_recording import (
+    generate_and_record_momentum_recommendation,
+    record_recommendation,
+)
 
 
 def make_recommendation() -> PortfolioRecommendation:
@@ -27,7 +27,7 @@ def make_recommendation() -> PortfolioRecommendation:
         price_date=date(2024, 1, 21),
         reference_price=Decimal("121.00"),
         currency="INR",
-        score=Decimal("1"),
+        score=Decimal(1),
         rationale="20-day momentum return is 21.00%.",
         strategy_name="baseline_momentum",
         strategy_version="v1",
@@ -39,7 +39,7 @@ def make_recommendation() -> PortfolioRecommendation:
 
 def write_test_price_history(output_directory: Path) -> None:
     start_date = date(2024, 1, 1)
-    close_values = [Decimal("100")] + [Decimal("101")] * 19 + [Decimal("121")]
+    close_values = [Decimal(100)] + [Decimal(101)] * 19 + [Decimal(121)]
 
     prices = [
         DailyPrice(
@@ -47,8 +47,8 @@ def write_test_price_history(output_directory: Path) -> None:
             symbol="RELIANCE",
             trade_date=start_date + timedelta(days=index),
             open_price=close_price,
-            high_price=close_price + Decimal("1"),
-            low_price=close_price - Decimal("1"),
+            high_price=close_price + Decimal(1),
+            low_price=close_price - Decimal(1),
             close_price=close_price,
             volume_qty=1_000,
             source_name="test-source",

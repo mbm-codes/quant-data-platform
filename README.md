@@ -231,3 +231,12 @@ rejected rather than overwritten.
 
 Only prices matching the requested dataset version are selected. A dataset
 version is a label, not a guarantee that the underlying files are immutable.
+
+### Evaluate a recorded recommendation
+
+Evaluate a recorded recommendation after later daily prices are available:
+
+```bash
+uv run python -m core.cli recommendation-evaluate \
+  "<recommendation-id>" \
+  --as-of YYYY-MM-DD
