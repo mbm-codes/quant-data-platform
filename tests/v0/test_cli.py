@@ -12,8 +12,12 @@ from typer.testing import CliRunner
 from core.cli import app
 from core.config.settings import get_settings
 from core.data.parquet import write_daily_prices_parquet
+from core.data.recommendation_evaluation_ledger import (
+    write_completed_recommendation_evaluations,
+)
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
+from core.models.recommendation_evaluation import RecommendationEvaluation
 from core.models.recommendations import PortfolioRecommendation
 
 runner = CliRunner()
@@ -489,3 +493,93 @@ def test_recommendation_evaluate_records_completed_evaluation(
     assert "Forward return | 10.00%" in result.output
     assert "Recorded evaluation |" in result.output
     assert len(list((data_dir / "recommendation_evaluations").rglob("*.parquet"))) == 1
+
+
+def test_evaluation_summary_prints_empty_message(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["evaluation-summary"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "No completed evaluations.\n"
+
+
+def test_evaluation_summary_prints_completed_metrics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    recommendations = [
+        PortfolioRecommendation(
+            recommendation_id="rec-001",
+            account_id="main",
+            exchange="NSE",
+            symbol="RELIANCE",
+            action="BUY",
+            as_of_date=date(2024, 1, 1),
+            price_date=date(2024, 1, 1),
+            reference_price=Decimal(100),
+            score=Decimal("0.75"),
+            rationale="Test recommendation.",
+            strategy_name="baseline_momentum",
+            strategy_version="v1",
+            generated_at=datetime(2024, 1, 1, tzinfo=UTC),
+            run_id="test-run",
+            input_dataset_version="test-v1",
+        ),
+        PortfolioRecommendation(
+            recommendation_id="rec-002",
+            account_id="main",
+            exchange="NSE",
+            symbol="TCS",
+            action="BUY",
+            as_of_date=date(2024, 1, 2),
+            price_date=date(2024, 1, 2),
+            reference_price=Decimal(200),
+            score=Decimal("0.75"),
+            rationale="Test recommendation.",
+            strategy_name="baseline_momentum",
+            strategy_version="v1",
+            generated_at=datetime(2024, 1, 2, tzinfo=UTC),
+            run_id="test-run",
+            input_dataset_version="test-v1",
+        ),
+    ]
+    evaluations = [
+        RecommendationEvaluation(
+            recommendation_id="rec-001",
+            evaluation_as_of_date=date(2024, 2, 1),
+            future_observations_found=20,
+            status="COMPLETED",
+            future_price_date=date(2024, 1, 21),
+            future_close_price=Decimal(110),
+            forward_return=Decimal("0.10"),
+        ),
+        RecommendationEvaluation(
+            recommendation_id="rec-002",
+            evaluation_as_of_date=date(2024, 2, 2),
+            future_observations_found=20,
+            status="COMPLETED",
+            future_price_date=date(2024, 1, 22),
+            future_close_price=Decimal(196),
+            forward_return=Decimal("-0.02"),
+        ),
+    ]
+    write_recommendation_ledger(
+        recommendations,
+        data_dir / "recommendations",
+    )
+    write_completed_recommendation_evaluations(
+        evaluations,
+        data_dir / "recommendation_evaluations",
+    )
+
+    result = runner.invoke(app, ["evaluation-summary"])
+
+    assert result.exit_code == 0, result.output
+    assert "Strategy | Version | Action | Completed" in result.output
+    assert "baseline_momentum | v1 | BUY | 2 | 4.00% | 1/2 | 50.00%" in result.output

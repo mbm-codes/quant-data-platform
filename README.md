@@ -240,3 +240,10 @@ Evaluate a recorded recommendation after later daily prices are available:
 uv run python -m core.cli recommendation-evaluate \
   "<recommendation-id>" \
   --as-of YYYY-MM-DD
+
+  ### Summarize completed evaluations
+
+View strategy performance from completed recommendation evaluations:
+
+```bash
+uv run python -m core.cli evaluation-summary
