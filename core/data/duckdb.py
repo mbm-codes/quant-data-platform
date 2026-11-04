@@ -51,3 +51,26 @@ def register_recommendations_view(
         );
         """
     )
+
+
+def register_recommendation_evaluations_view(
+    connection: duckdb.DuckDBPyConnection,
+    parquet_directory: Path,
+) -> None:
+    """Expose recommendation-evaluation Parquet files as a DuckDB view."""
+    parquet_glob = (
+        (parquet_directory / "evaluation_year=*" / "*.parquet")
+        .as_posix()
+        .replace("'", "''")
+    )
+
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW recommendation_evaluations AS
+        SELECT *
+        FROM read_parquet(
+            '{parquet_glob}',
+            hive_partitioning = true
+        );
+        """
+    )

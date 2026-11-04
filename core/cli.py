@@ -12,6 +12,9 @@ from core.config.settings import get_settings
 from core.data.duckdb import connect, register_daily_prices_view
 from core.services.bhavcopy_staging import stage_bhavcopy as stage_bhavcopy_service
 from core.services.csv_loader import load_csv as load_csv_service
+from core.services.evaluation_analytics import (
+    summarize_recorded_evaluations,
+)
 from core.services.historical_inventory import (
     inventory_historical as inventory_historical_service,
 )
@@ -383,6 +386,57 @@ def recommendation_evaluate(
     typer.echo(f"Future close price | {evaluation.future_close_price}")
     typer.echo(f"Forward return | {evaluation.forward_return:.2%}")
     typer.echo(f"Recorded evaluation | {written_path}")
+
+
+@app.command("evaluation-summary")
+def evaluation_summary() -> None:
+    """Summarize completed recommendation evaluations."""
+    settings = get_settings()
+
+    try:
+        summaries = summarize_recorded_evaluations(
+            database_path=settings.database_path,
+            recommendations_directory=settings.data_dir / "recommendations",
+            evaluations_directory=(settings.data_dir / "recommendation_evaluations"),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Unable to read the recommendation or evaluation ledger."
+        ) from error
+
+    if not summaries:
+        typer.echo("No completed evaluations.")
+        return
+
+    typer.echo(
+        "Strategy | Version | Action | Completed | Average return | "
+        "Directional result | Hit rate"
+    )
+
+    for summary in summaries:
+        if summary.directional_hit_rate is None:
+            directional_result = "N/A"
+            hit_rate = "N/A"
+        else:
+            directional_result = (
+                f"{summary.directional_correct_count}/"
+                f"{summary.directional_observations}"
+            )
+            hit_rate = f"{summary.directional_hit_rate:.2%}"
+
+        typer.echo(
+            " | ".join(
+                [
+                    summary.strategy_name,
+                    summary.strategy_version,
+                    summary.action,
+                    str(summary.completed_count),
+                    f"{summary.average_forward_return:.2%}",
+                    directional_result,
+                    hit_rate,
+                ]
+            )
+        )
 
 
 @app.command()
