@@ -8,7 +8,7 @@ def build_table_checks(df, cfg: list):
     for check in cfg:
         if not check.get("enabled", True):
             continue
-            
+
         name = check["name"]
         try:
             severity = DQSeverity(check.get("severity", DQSeverity.WARN))
@@ -20,14 +20,16 @@ def build_table_checks(df, cfg: list):
 
         if name == "primary_key_uniqueness":
             key_cols = check.get("columns", [])
-            checks.append(UniquenessCheck(
-                df=df,
-                key_columns=key_cols,
-                severity=severity,
-                action_on_warn=action_on_warn,
-                action_on_fail=action_on_fail,
-                mostly=mostly
-            ))
+            checks.append(
+                UniquenessCheck(
+                    df=df,
+                    key_columns=key_cols,
+                    severity=severity,
+                    action_on_warn=action_on_warn,
+                    action_on_fail=action_on_fail,
+                    mostly=mostly,
+                )
+            )
         else:
             raise ValueError(f"Unknown table check: {name}")
 

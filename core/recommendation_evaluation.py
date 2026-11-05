@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+
 def calculate_forward_return(
     reference_price: Decimal,
     future_price: Decimal,
@@ -9,5 +10,4 @@ def calculate_forward_return(
     if reference_price <= 0 or future_price <= 0:
         raise ValueError("Reference and future prices must be positive.")
 
-    return (future_price / reference_price) - Decimal("1")
-
+    return (future_price / reference_price) - Decimal(1)

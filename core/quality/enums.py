@@ -14,6 +14,7 @@ class DQAction(Enum):
     QUARANTINE = "QUARANTINE"
     BLOCK = "BLOCK"
 
+
 class DQSeverity(Enum):
     WARN = "WARN"
-    FAIL = "FAIL"  
+    FAIL = "FAIL"

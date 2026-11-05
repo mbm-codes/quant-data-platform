@@ -46,6 +46,6 @@ class SilverPipelineBase(PipelineBase):
     def write_silver(self, df: DataFrame):
         pass
 
-    #optional hook
+    # optional hook
     def run_quality_checks(self, df: DataFrame, ctx):
         pass

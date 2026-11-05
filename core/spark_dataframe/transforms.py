@@ -10,27 +10,31 @@ from pyspark.sql.types import (
 
 
 def normalize_column_names(df):
-    return df.select([sf.col(c).alias(c.strip().lower().replace(" ", "_")) for c in df.columns])
+    return df.select(
+        [sf.col(c).alias(c.strip().lower().replace(" ", "_")) for c in df.columns]
+    )
+
 
 def trim_and_nullify_strings(df):
-    return df.select([
-        sf.when(sf.trim(sf.col(c)) == "", None)
-        .otherwise(sf.trim(sf.col(c)))
-        .alias(c)
-        if isinstance(df.schema[c].dataType, StringType)
-        else sf.col(c)
-        for c in df.columns
-    ])
+    return df.select(
+        [
+            sf.when(sf.trim(sf.col(c)) == "", None)
+            .otherwise(sf.trim(sf.col(c)))
+            .alias(c)
+            if isinstance(df.schema[c].dataType, StringType)
+            else sf.col(c)
+            for c in df.columns
+        ]
+    )
+
 
 def standardize_date(df, col_names, src_format):
 
     for c in col_names:
-        df = df.withColumn(
-            c,
-            sf.to_date(sf.trim(sf.col(c)), src_format)
-        )
+        df = df.withColumn(c, sf.to_date(sf.trim(sf.col(c)), src_format))
 
     return df
+
 
 def cast_and_rename_columns(df, cast_rename_config: dict):
     """
@@ -40,6 +44,7 @@ def cast_and_rename_columns(df, cast_rename_config: dict):
         - Decimal types: decimal(precision,scale)
         - Complex types: array<>, map<>, struct<>, with auto JSON parsing if needed
     """
+
     def _replace_or_rename(df, src_col, dst_col, expr):
         df = df.withColumn(dst_col, expr)
         if src_col != dst_col:
@@ -55,6 +60,7 @@ def cast_and_rename_columns(df, cast_rename_config: dict):
         # --- Decimal type ---
         if dtype_str.lower().startswith("decimal"):
             import re
+
             m = re.match(r"decimal\((\d+),(\d+)\)", dtype_str)
             if m:
                 precision, scale = int(m.group(1)), int(m.group(2))
@@ -72,7 +78,7 @@ def cast_and_rename_columns(df, cast_rename_config: dict):
                 expr = sf.col(src_col)
             else:
                 # Assume it's JSON string → parse
-                expr = sf.from_json(sf.col(src_col), target_dtype)    # type: ignore
+                expr = sf.from_json(sf.col(src_col), target_dtype)  # type: ignore
 
         # --- Primitive types ---
         else:

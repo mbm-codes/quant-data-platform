@@ -7,7 +7,11 @@ import pytest
 
 from core.data.duckdb import connect, register_daily_prices_view
 from core.data.parquet import write_daily_prices_parquet
-from core.data.price_history import load_future_closes, load_recent_closes
+from core.data.price_history import (
+    load_future_closes,
+    load_recent_closes,
+    load_symbol_closes,
+)
 from core.models.daily_prices import DailyPrice
 
 
@@ -307,3 +311,36 @@ def test_load_future_closes_rejects_duplicate_on_twentieth_date() -> None:
             )
     finally:
         connection.close()
+
+
+def test_load_symbol_closes_returns_ordered_prices_for_dataset(
+    tmp_path: Path,
+) -> None:
+    prices_directory = tmp_path / "daily_prices"
+
+    prices = [
+        make_price(trade_date=date(2024, 1, 2), close_price=Decimal(101)),
+        make_price(trade_date=date(2024, 1, 1), close_price=Decimal(100)),
+        make_price(trade_date=date(2024, 1, 3), close_price=Decimal(102)).model_copy(
+            update={"dataset_version": "other-v1"}
+        ),
+    ]
+    write_daily_prices_parquet(prices, prices_directory)
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    try:
+        register_daily_prices_view(connection, prices_directory)
+
+        closes = load_symbol_closes(
+            connection,
+            exchange="nse",
+            symbol="reliance",
+            dataset_version="test-v1",
+        )
+    finally:
+        connection.close()
+
+    assert closes == [
+        (date(2024, 1, 1), Decimal(100)),
+        (date(2024, 1, 2), Decimal(101)),
+    ]

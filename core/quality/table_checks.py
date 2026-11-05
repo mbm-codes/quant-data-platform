@@ -7,15 +7,14 @@ from core.quality.policy import decide_action
 
 class UniquenessCheck(DataQualityCheck):
     def __init__(
-            self, 
-            df, 
-            key_columns: list[str], 
-            severity: DQSeverity, 
-            mostly: Decimal = Decimal("0.8"),
-            action_on_warn: DQAction | None = DQAction.NONE, 
-            action_on_fail: DQAction | None = DQAction.NONE
-            
-            ):
+        self,
+        df,
+        key_columns: list[str],
+        severity: DQSeverity,
+        mostly: Decimal = Decimal("0.8"),
+        action_on_warn: DQAction | None = DQAction.NONE,
+        action_on_fail: DQAction | None = DQAction.NONE,
+    ):
         self.df = df
         self.key_columns = key_columns
         self.severity = severity
@@ -33,26 +32,24 @@ class UniquenessCheck(DataQualityCheck):
                 status=CheckStatus.PASS,
                 action=DQAction.OBSERVE,
                 message="Primary key uniqueness holds",
-                 metrics = {
-                    "total_rows": total,
-                    "distinct_keys": distinct
-                }
+                metrics={"total_rows": total, "distinct_keys": distinct},
             )
-        
+
         duplicate_ratio = distinct / total
-        status = CheckStatus.WARN if duplicate_ratio >= self.mostly else CheckStatus.FAIL
-        dq_action = decide_action(status, self.severity, self.action_on_warn, self.action_on_fail)
-        
+        status = (
+            CheckStatus.WARN if duplicate_ratio >= self.mostly else CheckStatus.FAIL
+        )
+        dq_action = decide_action(
+            status, self.severity, self.action_on_warn, self.action_on_fail
+        )
+
         cols_sql = ", ".join(f"`{c}`" for c in self.key_columns)
         inv_predicate = cols_sql
         return CheckResult(
-                check_name="UniquenessCheck",
-                status=status,
-                action=dq_action,
-                message=f"{total - distinct} duplicate primary keys detected",
-                metrics = {
-                    "total_rows": total,
-                    "distinct_keys": distinct
-                },
-                invalid_predicate=inv_predicate
-            )
+            check_name="UniquenessCheck",
+            status=status,
+            action=dq_action,
+            message=f"{total - distinct} duplicate primary keys detected",
+            metrics={"total_rows": total, "distinct_keys": distinct},
+            invalid_predicate=inv_predicate,
+        )

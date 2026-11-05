@@ -247,3 +247,14 @@ View strategy performance from completed recommendation evaluations:
 
 ```bash
 uv run python -m core.cli evaluation-summary
+
+### Backtest baseline momentum
+
+Run a read-only historical backtest for one symbol:
+
+```bash
+uv run python -m core.cli backtest-momentum RELIANCE \
+  --start 2024-01-01 \
+  --end 2025-12-31 \
+  --input-dataset-version nse-bhavcopy-v1 \
+  --summary-only

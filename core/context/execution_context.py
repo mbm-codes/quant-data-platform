@@ -8,4 +8,3 @@ from core.control.job_control import JobControl
 class ExecutionContext:
     process: ProcessContext
     job_control: JobControl
-    

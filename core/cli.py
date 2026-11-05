@@ -8,8 +8,10 @@ from typing import Annotated
 import duckdb
 import typer
 
+from core.backtest_analytics import summarize_momentum_backtest
 from core.config.settings import get_settings
 from core.data.duckdb import connect, register_daily_prices_view
+from core.services.backtest import backtest_momentum
 from core.services.bhavcopy_staging import stage_bhavcopy as stage_bhavcopy_service
 from core.services.csv_loader import load_csv as load_csv_service
 from core.services.evaluation_analytics import (
@@ -432,6 +434,112 @@ def evaluation_summary() -> None:
                     summary.action,
                     str(summary.completed_count),
                     f"{summary.average_forward_return:.2%}",
+                    directional_result,
+                    hit_rate,
+                ]
+            )
+        )
+
+
+@app.command("backtest-momentum")
+def backtest_momentum_command(
+    symbol: Annotated[str, typer.Argument()],
+    start: Annotated[str, typer.Option()],
+    end: Annotated[str, typer.Option()],
+    input_dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+    summary_only: Annotated[bool, typer.Option("--summary-only")] = False,
+    step_observations: Annotated[
+        int,
+        typer.Option("--step-observations"),
+    ] = 1,
+) -> None:
+    """Run the baseline momentum strategy over a historical date range."""
+    try:
+        start_date = date.fromisoformat(start)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--start",
+        ) from error
+
+    try:
+        end_date = date.fromisoformat(end)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--end",
+        ) from error
+
+    settings = get_settings()
+
+    try:
+        observations = backtest_momentum(
+            exchange="NSE",
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            input_dataset_version=input_dataset_version,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            step_observations=step_observations,
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "No canonical daily-price Parquet data exists yet."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if not observations:
+        typer.echo("No complete backtest windows.")
+        return
+
+    if not summary_only:
+        typer.echo(
+            "As of | Action | Momentum return | Forward return | Future price date"
+        )
+
+        for observation in observations:
+            typer.echo(
+                " | ".join(
+                    [
+                        observation.as_of_date.isoformat(),
+                        observation.action,
+                        f"{observation.momentum_return:.2%}",
+                        f"{observation.forward_return:.2%}",
+                        observation.future_price_date.isoformat(),
+                    ]
+                )
+            )
+
+        typer.echo(f"Completed observations | {len(observations)}")
+        typer.echo("")
+
+    summaries = summarize_momentum_backtest(observations)
+
+    typer.echo(
+        "Action | Observations | Average forward return | "
+        "Median forward return | Directional result | Hit rate"
+    )
+
+    for summary in summaries:
+        if summary.directional_hit_rate is None:
+            directional_result = "N/A"
+            hit_rate = "N/A"
+        else:
+            directional_result = (
+                f"{summary.directional_correct_count}/"
+                f"{summary.directional_observations}"
+            )
+            hit_rate = f"{summary.directional_hit_rate:.2%}"
+
+        typer.echo(
+            " | ".join(
+                [
+                    summary.action,
+                    str(summary.observation_count),
+                    f"{summary.average_forward_return:.2%}",
+                    f"{summary.median_forward_return:.2%}",
                     directional_result,
                     hit_rate,
                 ]

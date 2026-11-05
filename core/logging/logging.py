@@ -12,6 +12,7 @@ class QDPLogger:
     - Singleton per logger name
     - Redirect Spark driver (py4j) logs to spark.log
     """
+
     # Expose logging levels as class attributes
     CRITICAL = logging.CRITICAL
     ERROR = logging.ERROR
@@ -21,15 +22,29 @@ class QDPLogger:
 
     _logger_instances = {}
 
-    def __new__(cls, name="qdp", app_log_file=None, spark_log_file=None,
-                level=logging.INFO, max_bytes=50*1024*1024, backup_count=5):
+    def __new__(
+        cls,
+        name="qdp",
+        app_log_file=None,
+        spark_log_file=None,
+        level=logging.INFO,
+        max_bytes=50 * 1024 * 1024,
+        backup_count=5,
+    ):
         # Singleton per logger name
         if name not in cls._logger_instances:
             cls._logger_instances[name] = super().__new__(cls)
         return cls._logger_instances[name]
 
-    def __init__(self, name="qdp", app_log_file=None, spark_log_file=None,
-                 level=logging.INFO, max_bytes=50*1024*1024, backup_count=5):
+    def __init__(
+        self,
+        name="qdp",
+        app_log_file=None,
+        spark_log_file=None,
+        level=logging.INFO,
+        max_bytes=50 * 1024 * 1024,
+        backup_count=5,
+    ):
 
         if hasattr(self, "_initialized") and self._initialized:
             return
@@ -41,7 +56,7 @@ class QDPLogger:
 
         formatter = logging.Formatter(
             "%(asctime)s | %(levelname)s | %(name)s | %(funcName)s | %(lineno)d | %(message)s",
-            "%Y-%m-%d %H:%M:%S"
+            "%Y-%m-%d %H:%M:%S",
         )
 
         # Console handler for app logs
@@ -54,7 +69,9 @@ class QDPLogger:
         if app_log_file:
             app_log_file = os.path.abspath(app_log_file)
             os.makedirs(os.path.dirname(app_log_file), exist_ok=True)
-            fh = RotatingFileHandler(app_log_file, maxBytes=max_bytes, backupCount=backup_count)
+            fh = RotatingFileHandler(
+                app_log_file, maxBytes=max_bytes, backupCount=backup_count
+            )
             fh.setLevel(level)
             fh.setFormatter(formatter)
             self.app_logger.addHandler(fh)
@@ -67,7 +84,9 @@ class QDPLogger:
         if spark_log_file:
             spark_log_file = os.path.abspath(spark_log_file)
             os.makedirs(os.path.dirname(spark_log_file), exist_ok=True)
-            spark_fh = RotatingFileHandler(spark_log_file, maxBytes=max_bytes, backupCount=backup_count)
+            spark_fh = RotatingFileHandler(
+                spark_log_file, maxBytes=max_bytes, backupCount=backup_count
+            )
             spark_fh.setLevel(level)
             spark_fh.setFormatter(formatter)
             self.spark_logger.addHandler(spark_fh)
@@ -75,11 +94,20 @@ class QDPLogger:
         self._initialized = True
 
     # ----- App log convenience methods -----
-    def debug(self, msg):    self.app_logger.debug(msg)
-    def info(self, msg):     self.app_logger.info(msg)
-    def warning(self, msg):  self.app_logger.warning(msg)
-    def error(self, msg):    self.app_logger.error(msg)
-    def exception(self, msg): self.app_logger.exception(msg)
+    def debug(self, msg):
+        self.app_logger.debug(msg)
+
+    def info(self, msg):
+        self.app_logger.info(msg)
+
+    def warning(self, msg):
+        self.app_logger.warning(msg)
+
+    def error(self, msg):
+        self.app_logger.error(msg)
+
+    def exception(self, msg):
+        self.app_logger.exception(msg)
 
     # ----- Spark driver log integration -----
     def attach_spark_logs(self, spark, level=logging.INFO):

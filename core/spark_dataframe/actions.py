@@ -1,4 +1,3 @@
-
 def safe_count(df, logger=None):
     try:
         return df.count()

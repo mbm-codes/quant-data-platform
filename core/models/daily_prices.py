@@ -35,8 +35,7 @@ class DailyPrice(BaseModel):
 
     @model_validator(mode="after")
     def validate_ohlc_prices(self) -> "DailyPrice":
-        if self.high_price < max(self.open_price, self.close_price, 
-                                 self.low_price):
+        if self.high_price < max(self.open_price, self.close_price, self.low_price):
             raise ValueError("high_price must be at least open, close, and low.")
 
         if self.low_price > min(self.open_price, self.close_price, self.high_price):

@@ -31,7 +31,9 @@ class PipelineBase(ABC):
         ctx = self.create_execution_context()
         self.logger.info(f"Process Context: {ctx.process}")
 
-        load_type = getattr(self.config, "load_type", self.config.get("load_type", "full"))
+        load_type = getattr(
+            self.config, "load_type", self.config.get("load_type", "full")
+        )
         try:
             ctx.job_control.start_run(load_type)
             self.pre_etl(ctx)
@@ -44,21 +46,18 @@ class PipelineBase(ABC):
         except Exception as e:
             self.on_failure(e, ctx)
             raise
-        
-    
+
     def pre_etl(self, ctx):
         """Hook for pre-ETL operations"""
         self.logger.debug("Default pre-etl: no-op")
-        
-    
+
     def post_etl(self, ctx):
         """Hook for post-ETL operations"""
         self.logger.debug("Default post-etl: no-op")
-    
+
     def on_failure(self, error, ctx):
         """Hook for failure handling"""
         self.logger.error(f"Pipeline failed: {error}")
-        
 
     def create_execution_context(self):
         from core.context.execution_context import ExecutionContext
@@ -71,16 +70,15 @@ class PipelineBase(ABC):
             pipeline_version=self.config["pipeline_version"],
             is_backfill=self.config.get("is_backfill", False),
             process_id=self.config["process_id"],
-            run_id=self.config.get("run_id"),    # will be overriden if orchestrator provides one
+            run_id=self.config.get(
+                "run_id"
+            ),  # will be overriden if orchestrator provides one
             process_name=self.config["process_name"],
             spark=self.spark,
             force_new_run_id=False,
-            orchestrator_context=None
+            orchestrator_context=None,
         )
 
         job_control = JobControl(self.spark, process_ctx)
 
-        return ExecutionContext(
-            process=process_ctx,
-            job_control=job_control
-        )
+        return ExecutionContext(process=process_ctx, job_control=job_control)
