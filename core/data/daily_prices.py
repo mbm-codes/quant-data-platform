@@ -9,11 +9,4 @@ def load_daily_prices_csv(path: Path) -> list[DailyPrice]:
     file."""
 
     with path.open(encoding="utf-8", newline="") as source_file:
-        return [
-            DailyPrice.model_validate(row)
-            for row in csv.DictReader(source_file)
-        ]
-
-
-
-    
+        return [DailyPrice.model_validate(row) for row in csv.DictReader(source_file)]

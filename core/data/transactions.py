@@ -30,9 +30,7 @@ def load_portfolio_transactions_csv(
         unexpected_columns = fieldnames - REQUIRED_COLUMNS
 
         if missing_columns or unexpected_columns:
-            raise ValueError(
-                f"Unexpected columns in {path.name}: {reader.fieldnames}"
-            )
+            raise ValueError(f"Unexpected columns in {path.name}: {reader.fieldnames}")
 
         transactions: list[PortfolioTransaction] = []
         transaction_ids: set[str] = set()

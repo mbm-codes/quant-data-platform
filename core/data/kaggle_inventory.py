@@ -26,14 +26,10 @@ class HistoricalFileInventory:
             "row_count": self.row_count,
             "rejected_row_count": len(self.rejected_rows),
             "first_trade_date": (
-                self.first_trade_date.isoformat()
-                if self.first_trade_date
-                else None
+                self.first_trade_date.isoformat() if self.first_trade_date else None
             ),
             "last_trade_date": (
-                self.last_trade_date.isoformat()
-                if self.last_trade_date
-                else None
+                self.last_trade_date.isoformat() if self.last_trade_date else None
             ),
             "error": self.error,
             "rejections": [
@@ -125,14 +121,10 @@ def inventory_kaggle_historical_directory(
                 symbol=records[0].symbol if records else _symbol_from_filename(path),
                 row_count=len(records),
                 first_trade_date=(
-                    min(record.trade_date for record in records)
-                    if records
-                    else None
+                    min(record.trade_date for record in records) if records else None
                 ),
                 last_trade_date=(
-                    max(record.trade_date for record in records)
-                    if records
-                    else None
+                    max(record.trade_date for record in records) if records else None
                 ),
                 rejected_rows=tuple(result.rejections),
             )

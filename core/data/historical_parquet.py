@@ -45,9 +45,10 @@ HISTORICAL_QUARANTINE_SCHEMA = pa.schema(
     ]
 )
 
+
 def write_historical_source_prices(
-        records: list[HistoricalSourcePrice],
-        output_directory: Path,
+    records: list[HistoricalSourcePrice],
+    output_directory: Path,
 ) -> list[Path]:
     """Write one source file's validated rows into year-partitioned Parquet."""
 
@@ -68,9 +69,7 @@ def write_historical_source_prices(
 
     for trade_year, year_records in records_by_year.items():
         output_path = (
-            output_directory
-            / f"trade_year={trade_year}"
-            / f"{source_token}.parquet"
+            output_directory / f"trade_year={trade_year}" / f"{source_token}.parquet"
         )
 
         table = pa.Table.from_pylist(
@@ -83,13 +82,14 @@ def write_historical_source_prices(
 
     return written_paths
 
+
 def write_historical_rejections(
-        rejections: list[HistoricalRowRejection],
-        output_directory: Path,
-        *,
-        run_id: str,
-        dataset_version: str,
-        rejected_at: datetime,
+    rejections: list[HistoricalRowRejection],
+    output_directory: Path,
+    *,
+    run_id: str,
+    dataset_version: str,
+    rejected_at: datetime,
 ) -> list[Path]:
     """Write one source file's rejected rows to a quarantine Parquet dataset."""
     if not rejections:
@@ -125,12 +125,14 @@ def write_historical_rejections(
 
     return [output_path]
 
+
 def _write_table_atomically(table: pa.Table, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = output_path.with_suffix(".tmp")
 
     pq.write_table(table, temporary_path)
     temporary_path.replace(output_path)
+
 
 def _source_file_token(source_file: str) -> str:
     return hashlib.sha256(source_file.encode("utf-8")).hexdigest()[:16]

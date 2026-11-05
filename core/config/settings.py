@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     database_path: Path = Path("data/qdp.duckdb")
 
+
 @lru_cache
 def get_settings() -> Settings:
     """Return one validated settings instance per process."""
 
     return Settings()
-

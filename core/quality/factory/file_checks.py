@@ -16,12 +16,10 @@ def build_file_checks(spark, cfg: dict, file_path: str):
         elif name == "non_empty_file":
             checks.append(
                 NonEmptyFileCheck(
-                    file_path=file_path,
-                    spark=spark,
-                    min_rows=check.get("min_rows", 1)
+                    file_path=file_path, spark=spark, min_rows=check.get("min_rows", 1)
                 )
             )
         else:
             raise ValueError(f"Unknown file check: {name}")
-    
+
     return checks

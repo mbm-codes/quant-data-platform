@@ -5,6 +5,7 @@ class DataQualityRunner:
     def __init__(self, checks: list, logger=None):
         self.checks = checks
         self.logger = logger
+
     def run(self):
         results = []
         for check in self.checks:

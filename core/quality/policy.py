@@ -7,7 +7,6 @@ DQ_ACTION_MATRIX = {
     (CheckStatus.FAIL, DQSeverity.FAIL): DQAction.BLOCK,
     (CheckStatus.WARN, DQSeverity.WARN): DQAction.OBSERVE,
     (CheckStatus.WARN, DQSeverity.FAIL): DQAction.QUARANTINE,
-
 }
 
 DQ_ACTION_PRIORITY = {
@@ -15,22 +14,27 @@ DQ_ACTION_PRIORITY = {
     DQAction.OBSERVE: 1,
     DQAction.QUARANTINE: 2,
     DQAction.CLEAN: 3,
-    DQAction.BLOCK: 4
+    DQAction.BLOCK: 4,
 }
 
+
 def decide_action(status, severity, action_on_warn, action_on_fail) -> DQAction:
-    
+
     if status == CheckStatus.WARN:
-        if DQ_ACTION_PRIORITY[DQ_ACTION_MATRIX[(status, severity)]] >= DQ_ACTION_PRIORITY[action_on_warn]:
+        if (
+            DQ_ACTION_PRIORITY[DQ_ACTION_MATRIX[(status, severity)]]
+            >= DQ_ACTION_PRIORITY[action_on_warn]
+        ):
             return DQ_ACTION_MATRIX[(status, severity)]
         else:
             return action_on_warn
     elif status == CheckStatus.FAIL:
-        if DQ_ACTION_PRIORITY[DQ_ACTION_MATRIX[(status, severity)]] >= DQ_ACTION_PRIORITY[action_on_fail]:
+        if (
+            DQ_ACTION_PRIORITY[DQ_ACTION_MATRIX[(status, severity)]]
+            >= DQ_ACTION_PRIORITY[action_on_fail]
+        ):
             return DQ_ACTION_MATRIX[(status, severity)]
         else:
             return action_on_fail
     else:
         return DQAction.OBSERVE
-
-

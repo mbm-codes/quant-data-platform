@@ -39,7 +39,7 @@ class FileExistsCheck(DataQualityCheck):
                 status=CheckStatus.PASS,
                 action=DQAction.OBSERVE,
                 message=f"Found {file_count} file(s) at path: {self.path}",
-                metrics={"file_count": file_count}
+                metrics={"file_count": file_count},
             )
 
         return CheckResult(
@@ -50,8 +50,9 @@ class FileExistsCheck(DataQualityCheck):
                 f"Found {file_count} file(s) "
                 f"(min required: {self.min_files}) at path: {self.path}"
             ),
-            metrics={"file_count": file_count}
+            metrics={"file_count": file_count},
         )
+
 
 class NonEmptyFileCheck(DataQualityCheck):
     def __init__(self, file_path: str, spark, min_rows: int = 1):
@@ -70,22 +71,21 @@ class NonEmptyFileCheck(DataQualityCheck):
                     status=CheckStatus.PASS,
                     action=DQAction.OBSERVE,
                     message=f"File has {row_count} rows",
-                    metrics={"row_count": row_count}
+                    metrics={"row_count": row_count},
                 )
-            
+
             return CheckResult(
                 check_name="NonEmptyFileCheck",
                 status=CheckStatus.FAIL,
                 action=DQAction.BLOCK,
                 message=f"File has only {row_count} rows (min required: {self.min_rows})",
-                metrics={"row_count": row_count}
-
+                metrics={"row_count": row_count},
             )
-        
+
         except Exception as e:
             return CheckResult(
                 check_name="NonEmptyFileCheck",
                 status=CheckStatus.FAIL,
                 action=DQAction.OBSERVE,
-                message=f"Failed to read file: {e!s}"
+                message=f"Failed to read file: {e!s}",
             )

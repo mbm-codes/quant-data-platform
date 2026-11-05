@@ -10,9 +10,9 @@ class IngestionBase(PipelineBase):
     Base class for ingestion -> bronze pipelines
     """
 
-    def extract(self) -> DataFrame: 
+    def extract(self) -> DataFrame:
         return self.read_source()
-    
+
     def transform(self, df_or_dfs, ctx) -> DataFrame:
         if isinstance(df_or_dfs, DataFrame):
             df = df_or_dfs
@@ -20,7 +20,7 @@ class IngestionBase(PipelineBase):
             df = next(iter(df_or_dfs.values()))
         else:
             raise ValueError("df_or_dfs must be a DataFrame or dict")
-        
+
         df = self.standardize(df)
         df = self.cast_types(df)
         self.run_data_quality_checks(df, ctx)
@@ -29,12 +29,12 @@ class IngestionBase(PipelineBase):
     def load(self, df: DataFrame):
         self.write_bronze(df)
 
-    #---- Abstract ingestion-specific methods ---
+    # ---- Abstract ingestion-specific methods ---
 
     @abstractmethod
     def read_source(self) -> DataFrame:
         pass
-    
+
     @abstractmethod
     def standardize(self, df: DataFrame) -> DataFrame:
         pass
@@ -42,12 +42,12 @@ class IngestionBase(PipelineBase):
     @abstractmethod
     def cast_types(self, df: DataFrame) -> DataFrame:
         pass
-    
+
     @abstractmethod
     def write_bronze(self, df: DataFrame):
         pass
 
-    #---- Optional ----
+    # ---- Optional ----
 
     def run_data_quality_checks(self, df: DataFrame, ctx):
         pass

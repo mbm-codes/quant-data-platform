@@ -22,7 +22,7 @@ class ProcessContext:
     @property
     def process_date(self):
         return self.process_timestamp.date()
-    
+
     @property
     def process_time(self):
         return self.process_timestamp.time()
@@ -43,8 +43,7 @@ def _generate_process_id(spark=None, process_name: str = "") -> str:
         try:
             jvm = spark.sparkContext._jvm
             jvm_pid = (
-                jvm.java.lang.management.ManagementFactory
-                .getRuntimeMXBean()
+                jvm.java.lang.management.ManagementFactory.getRuntimeMXBean()
                 .getName()
                 .split("@")[0]
             )
@@ -57,7 +56,9 @@ def _generate_process_id(spark=None, process_name: str = "") -> str:
     return f"{name_part}-{ts}-{uuid.uuid4().hex[:8]}"
 
 
-def _generate_run_id(force_new: bool = False, existing_run_id: str | None = None) -> str:
+def _generate_run_id(
+    force_new: bool = False, existing_run_id: str | None = None
+) -> str:
     """
     Generates a run_id for this attempt.
     - force_new=True → always generate a new UUID
@@ -73,7 +74,7 @@ def _extract_orchestrator_metadata(orchestrator_context: dict | None = None) -> 
     """
     Extracts common fields from orchestration tool context.
     Supports Airflow, Prefect, Argo, etc.
-    
+
     Expected keys (if available):
       - run_id
       - process_name / dag_id / flow_name
@@ -106,14 +107,14 @@ def _extract_orchestrator_metadata(orchestrator_context: dict | None = None) -> 
 # Factory Function
 # =========================
 def create_process_context(
-        pipeline_version: str,
-        is_backfill: bool = False,
-        process_id: str | None = None,
-        run_id: str | None = None,
-        process_name: str | None = None,
-        spark=None,
-        force_new_run_id: bool = False,
-        orchestrator_context: dict | None = None
+    pipeline_version: str,
+    is_backfill: bool = False,
+    process_id: str | None = None,
+    run_id: str | None = None,
+    process_name: str | None = None,
+    spark=None,
+    force_new_run_id: bool = False,
+    orchestrator_context: dict | None = None,
 ) -> ProcessContext:
     """
     Creates a ProcessContext with orchestration-awareness, Spark support, and retry-friendly run_id.
@@ -133,13 +134,19 @@ def create_process_context(
     # Extract metadata from orchestration tool
     orchestration_metadata = _extract_orchestrator_metadata(orchestrator_context)
 
-    resolved_process_name = process_name or orchestration_metadata.get("process_name") or "python_pipeline"
+    resolved_process_name = (
+        process_name or orchestration_metadata.get("process_name") or "python_pipeline"
+    )
     resolved_is_backfill = orchestration_metadata.get("is_backfill", is_backfill)
     resolved_run_id = _generate_run_id(
         force_new=force_new_run_id,
-        existing_run_id=run_id or orchestration_metadata.get("run_id") or os.getenv("RUN_ID")
+        existing_run_id=run_id
+        or orchestration_metadata.get("run_id")
+        or os.getenv("RUN_ID"),
     )
-    resolved_process_id = process_id or _generate_process_id(spark, resolved_process_name)
+    resolved_process_id = process_id or _generate_process_id(
+        spark, resolved_process_name
+    )
     resolved_pipeline_version = os.getenv("PIPELINE_VERSION") or pipeline_version
 
     return ProcessContext(
@@ -148,16 +155,19 @@ def create_process_context(
         process_name=resolved_process_name,
         pipeline_version=resolved_pipeline_version,
         process_timestamp=ts,
-        is_backfill=bool(resolved_is_backfill)
+        is_backfill=bool(resolved_is_backfill),
     )
 
+
 def process_context_to_string(process_context: ProcessContext) -> str:
-   """
-   Converts a ProcessContext object to a human-readable string for logging purposes.
-   """
-   return (f"ProcessID: {process_context.process_id}, "
-           f"RunID: {process_context.run_id}, "
-           f"ProcessName: {process_context.process_name}, "
-           f"PipelineVersion: {process_context.pipeline_version}, "
-           f"IsBackfill: {process_context.is_backfill}, "
-           f"ProcessTimestamp: {process_context.process_timestamp}")
+    """
+    Converts a ProcessContext object to a human-readable string for logging purposes.
+    """
+    return (
+        f"ProcessID: {process_context.process_id}, "
+        f"RunID: {process_context.run_id}, "
+        f"ProcessName: {process_context.process_name}, "
+        f"PipelineVersion: {process_context.pipeline_version}, "
+        f"IsBackfill: {process_context.is_backfill}, "
+        f"ProcessTimestamp: {process_context.process_timestamp}"
+    )

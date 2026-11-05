@@ -18,7 +18,8 @@ class SparkMetricsEmitter(MetricsEmitter):
         self.spark = spark
         self.table_name = table_name
         self.default_tags = default_tags or {}
-        self.schema = StructType([
+        self.schema = StructType(
+            [
                 StructField("ts", TimestampType(), False),
                 StructField("metric_name", StringType(), False),
                 StructField("metric_type", StringType(), False),
@@ -27,9 +28,8 @@ class SparkMetricsEmitter(MetricsEmitter):
                 StructField("table_name", StringType(), True),
                 StructField("layer", StringType(), True),
                 StructField("tags", MapType(StringType(), StringType()), True),
-            ]       
+            ]
         )
-
 
     def _emit(self, name, metric_type, value, tags):
 
@@ -48,13 +48,12 @@ class SparkMetricsEmitter(MetricsEmitter):
             pipeline=pipeline,
             table_name=table_name,
             layer=layer,
-            tags=merged_tags
+            tags=merged_tags,
         )
 
-        self.spark.createDataFrame([row], schema=self.schema) \
-            .writeTo(self.table_name) \
-            .append()
-
+        self.spark.createDataFrame([row], schema=self.schema).writeTo(
+            self.table_name
+        ).append()
 
     def increment(self, name, value=1, tags=None):
         self._emit(name, "counter", value, tags)

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
 class HistoricalSourcePrice(BaseModel):
     """A validated record from the Kaggle historical NSE source."""
 

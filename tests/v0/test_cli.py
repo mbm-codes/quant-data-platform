@@ -583,3 +583,128 @@ def test_evaluation_summary_prints_completed_metrics(
     assert result.exit_code == 0, result.output
     assert "Strategy | Version | Action | Completed" in result.output
     assert "baseline_momentum | v1 | BUY | 2 | 4.00% | 1/2 | 50.00%" in result.output
+
+
+def test_backtest_momentum_prints_completed_observations(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    start_date = date(2024, 1, 1)
+
+    close_values = (
+        [Decimal(100)] + [Decimal(101)] * 19 + [Decimal(121)] + [Decimal("133.10")] * 20
+    )
+
+    prices = [
+        DailyPrice(
+            exchange="NSE",
+            symbol="RELIANCE",
+            trade_date=start_date + timedelta(days=index),
+            open_price=close_price,
+            high_price=close_price,
+            low_price=close_price,
+            close_price=close_price,
+            volume_qty=1_000,
+            source_name="test-source",
+            source_file="prices.csv",
+            source_hash="test-source-hash",
+            ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+            run_id="test-run",
+            dataset_version="test-v1",
+        )
+        for index, close_price in enumerate(close_values)
+    ]
+    write_daily_prices_parquet(prices, data_dir / "daily_prices")
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest-momentum",
+            "reliance",
+            "--start",
+            "2024-01-21",
+            "--end",
+            "2024-01-21",
+            "--input-dataset-version",
+            "test-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "As of | Action | Momentum return" in result.output
+    assert "2024-01-21 | BUY | 21.00% | 10.00% | 2024-02-10" in result.output
+    assert "Completed observations | 1" in result.output
+    assert "Action | Observations | Average forward return" in result.output
+    assert "BUY | 1 | 10.00% | 10.00% | 1/1 | 100.00%" in result.output
+
+
+def test_backtest_momentum_summary_only_hides_observation_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    start_date = date(2024, 1, 1)
+
+    close_values = (
+        [Decimal(100)] + [Decimal(101)] * 19 + [Decimal(121)] + [Decimal("133.10")] * 20
+    )
+    prices = [
+        DailyPrice(
+            exchange="NSE",
+            symbol="RELIANCE",
+            trade_date=start_date + timedelta(days=index),
+            open_price=close_price,
+            high_price=close_price,
+            low_price=close_price,
+            close_price=close_price,
+            volume_qty=1_000,
+            source_name="test-source",
+            source_file="prices.csv",
+            source_hash="test-source-hash",
+            ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+            run_id="test-run",
+            dataset_version="test-v1",
+        )
+        for index, close_price in enumerate(close_values)
+    ]
+    write_daily_prices_parquet(prices, data_dir / "daily_prices")
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest-momentum",
+            "RELIANCE",
+            "--start",
+            "2024-01-21",
+            "--end",
+            "2024-01-21",
+            "--input-dataset-version",
+            "test-v1",
+            "--summary-only",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "As of | Action | Momentum return" not in result.output
+    assert "Completed observations |" not in result.output
+    assert "Action | Observations | Average forward return" in result.output
+    assert "BUY | 1 | 10.00% | 10.00% | 1/1 | 100.00%" in result.output
+
+    def test_backtest_momentum_rejects_non_positive_step() -> None:
+        result = runner.invoke(
+            app,
+            [
+                "backtest-momentum",
+                "RELIANCE",
+                "--start",
+                "2024-01-01",
+                "--end",
+                "2024-01-31",
+                "--step-observations",
+                "0",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "step_observations must be greater than zero" in result.output

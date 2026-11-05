@@ -1,5 +1,3 @@
-
-
 class MetricsEmitter:
     def increment(self, name: str, value: int = 1, tags: dict | None = None):
         raise NotImplementedError

@@ -86,3 +86,40 @@ def load_future_closes(
             )
 
     return [(trade_date, close_price) for trade_date, close_price, _ in rows]
+
+
+def load_symbol_closes(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    exchange: str,
+    symbol: str,
+    dataset_version: str,
+) -> list[tuple[date, Decimal]]:
+    """Return all unique canonical closes for one symbol in date order."""
+    rows = connection.execute(
+        """
+        SELECT
+            trade_date,
+            MIN(close_price) AS close_price,
+            COUNT(*) AS row_count
+        FROM daily_prices
+        WHERE exchange = ?
+            AND symbol = ?
+            AND dataset_version = ?
+        GROUP BY trade_date
+        ORDER BY trade_date ASC
+        """,
+        [
+            exchange.strip().upper(),
+            symbol.strip().upper(),
+            dataset_version,
+        ],
+    ).fetchall()
+
+    for trade_date, _, row_count in rows:
+        if row_count > 1:
+            raise ValueError(
+                f"Duplicate daily prices found for {trade_date.isoformat()}."
+            )
+
+    return [(trade_date, close_price) for trade_date, close_price, _ in rows]

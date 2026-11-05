@@ -2,10 +2,10 @@ from core.context.process_context import ProcessContext
 
 
 class JobControl:
-    def __init__(self, spark, process_context: ProcessContext ):
+    def __init__(self, spark, process_context: ProcessContext):
         self.spark = spark
         self.proc_ctx = process_context
-    
+
     def start_run(self, load_type):
         self.run_id = self.proc_ctx.run_id
         ts_str = self.proc_ctx.process_timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -24,7 +24,7 @@ class JobControl:
         """)
 
         return self.run_id
-    
+
     def get_watermark(self):
         df = self.spark.sql(f"""
             SELECT last_successful_load_ts 
@@ -32,7 +32,7 @@ class JobControl:
             WHERE job_name = '{self.proc_ctx.process_name}'
         """)
         return df.collect()[0][0] if df.count() > 0 else None
-    
+
     def mark_success(self, max_ts, rows_written):
         self.spark.sql(f"""
             UPDATE local.control_db.job_run_audit

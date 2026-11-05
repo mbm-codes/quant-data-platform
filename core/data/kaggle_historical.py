@@ -66,9 +66,7 @@ def load_kaggle_historical_file_with_rejections(
         unexpected_columns = fieldnames - REQUIRED_COLUMNS - OPTIONAL_COLUMNS
 
         if missing_columns or unexpected_columns:
-            raise ValueError(
-                f"Unexpected columns in {path.name}: {reader.fieldnames}"
-            )
+            raise ValueError(f"Unexpected columns in {path.name}: {reader.fieldnames}")
 
         records: list[HistoricalSourcePrice] = []
         rejections: list[HistoricalRowRejection] = []
