@@ -1,6 +1,8 @@
 # core/recommendation_evaluation.py
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
+
+RETURN_QUANTUM = Decimal("0.00000001")
 
 
 def calculate_forward_return(
@@ -10,4 +12,7 @@ def calculate_forward_return(
     if reference_price <= 0 or future_price <= 0:
         raise ValueError("Reference and future prices must be positive.")
 
-    return (future_price / reference_price) - Decimal(1)
+    return ((future_price / reference_price) - Decimal(1)).quantize(
+        RETURN_QUANTUM,
+        rounding=ROUND_HALF_UP,
+    )

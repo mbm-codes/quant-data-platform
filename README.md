@@ -269,3 +269,14 @@ uv run python -m core.cli rank-momentum \
   --symbols-file /path/to/nse_research_universe.csv \
   --limit 10 \
   --input-dataset-version nse-bhavcopy-v1
+
+  ### Record a momentum ranking snapshot
+
+Generate and immutably record the full eligible ranking universe:
+
+```bash
+uv run python -m core.cli rank-momentum-record \
+  --as-of 2026-01-20 \
+  --run-id m11-manual-check-002 \
+  --symbols-file /path/to/nse_research_universe.csv \
+  --input-dataset-version nse-bhavcopy-v1

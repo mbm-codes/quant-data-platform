@@ -1,3 +1,5 @@
+import hashlib
+from collections.abc import Iterable
 from pathlib import Path
 
 from core.data.universe import load_symbol_allowlist_csv
@@ -11,3 +13,11 @@ def resolve_symbol_universe(
         return None
 
     return load_symbol_allowlist_csv(symbols_file)
+
+
+def calculate_universe_hash(symbols: Iterable[str]) -> str:
+    """Return a stable SHA-256 hash for a normalized symbol universe."""
+    normalized_symbols = sorted({symbol.strip().upper() for symbol in symbols})
+    serialized_symbols = "\n".join(normalized_symbols)
+
+    return hashlib.sha256(serialized_symbols.encode("utf-8")).hexdigest()
