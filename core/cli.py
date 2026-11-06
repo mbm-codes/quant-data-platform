@@ -22,6 +22,7 @@ from core.services.historical_inventory import (
 )
 from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
+from core.services.ranking import rank_momentum_universe
 from core.services.recommendation import (
     preview_momentum_recommendation as preview_momentum_recommendation_service,
 )
@@ -31,6 +32,7 @@ from core.services.recommendation_evaluation_recording import (
 from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
+from core.services.universe import resolve_symbol_universe
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -584,6 +586,107 @@ def query(
 
     finally:
         connection.close()
+
+
+@app.command("rank-momentum")
+def rank_momentum(
+    as_of: Annotated[str, typer.Option()],
+    limit: Annotated[int, typer.Option()] = 10,
+    input_dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+    max_price_age_days: Annotated[int, typer.Option()] = 7,
+    symbols_file: Annotated[
+        Path | None,
+        typer.Option("--symbols-file", exists=True, dir_okay=False),
+    ] = None,
+) -> None:
+    """Rank eligible NSE symbols by baseline momentum score."""
+    if limit <= 0:
+        raise typer.BadParameter(
+            "limit must be greater than zero.",
+            param_hint="--limit",
+        )
+
+    try:
+        as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    try:
+        allowed_symbols = resolve_symbol_universe(symbols_file)
+    except ValueError as error:
+        raise typer.BadParameter(
+            str(error),
+            param_hint="--symbols-file",
+        ) from error
+
+    settings = get_settings()
+
+    try:
+        candidates = rank_momentum_universe(
+            exchange="NSE",
+            as_of_date=as_of_date,
+            input_dataset_version=input_dataset_version,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            max_price_age_days=max_price_age_days,
+            allowed_symbols=allowed_symbols,
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "No canonical daily-price Parquet data exists yet."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if not candidates:
+        typer.echo("No eligible momentum candidates.")
+        return
+
+    highest_candidates = candidates[:limit]
+    lowest_start_index = max(
+        limit,
+        len(candidates) - limit,
+    )
+    lowest_candidates = list(reversed(candidates[lowest_start_index:]))
+
+    typer.echo("Highest momentum scores")
+    typer.echo("Rank | Symbol | Price date | Momentum | Score | Action")
+
+    for candidate in highest_candidates:
+        typer.echo(
+            " | ".join(
+                [
+                    str(candidate.rank),
+                    candidate.symbol,
+                    candidate.price_date.isoformat(),
+                    f"{candidate.momentum_return:.2%}",
+                    f"{candidate.score:.2%}",
+                    candidate.action,
+                ]
+            )
+        )
+
+    if lowest_candidates:
+        typer.echo("")
+        typer.echo("Lowest momentum scores")
+        typer.echo("Rank | Symbol | Price date | Momentum | Score | Action")
+
+        for candidate in reversed(candidates[-limit:]):
+            typer.echo(
+                " | ".join(
+                    [
+                        str(candidate.rank),
+                        candidate.symbol,
+                        candidate.price_date.isoformat(),
+                        f"{candidate.momentum_return:.2%}",
+                        f"{candidate.score:.2%}",
+                        candidate.action,
+                    ]
+                )
+            )
 
 
 if __name__ == "__main__":

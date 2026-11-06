@@ -10,6 +10,7 @@ from core.data.parquet import write_daily_prices_parquet
 from core.data.price_history import (
     load_future_closes,
     load_recent_closes,
+    load_recent_closes_by_symbol,
     load_symbol_closes,
 )
 from core.models.daily_prices import DailyPrice
@@ -344,3 +345,83 @@ def test_load_symbol_closes_returns_ordered_prices_for_dataset(
         (date(2024, 1, 1), Decimal(100)),
         (date(2024, 1, 2), Decimal(101)),
     ]
+
+
+def test_load_recent_closes_by_symbol_returns_each_symbol_window(
+    tmp_path: Path,
+) -> None:
+    prices_directory = tmp_path / "daily_prices"
+    start_date = date(2024, 1, 1)
+
+    prices: list[DailyPrice] = []
+
+    for index in range(21):
+        trade_date = start_date + timedelta(days=index)
+
+        reliance_price = make_price(
+            trade_date=trade_date,
+            close_price=Decimal(100) + Decimal(index),
+        )
+
+        prices.append(reliance_price)
+
+        prices.append(
+            reliance_price.model_copy(
+                update={
+                    "symbol": "TCS",
+                    "source_file": "tcs.csv",
+                }
+            )
+        )
+
+    for index in range(20):
+        incomplete_price = make_price(
+            trade_date=start_date + timedelta(days=index),
+            close_price=Decimal(200) + Decimal(index),
+        ).model_copy(
+            update={
+                "symbol": "INCOMPLETE",
+                "source_file": "incomplete.csv",
+            }
+        )
+        prices.append(incomplete_price)
+
+    prices.append(
+        make_price(
+            trade_date=date(2024, 1, 22),
+            close_price=Decimal(999),
+        )
+    )
+
+    write_daily_prices_parquet(prices, prices_directory)
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    try:
+        register_daily_prices_view(connection, prices_directory)
+
+        closes_by_symbol = load_recent_closes_by_symbol(
+            connection,
+            exchange="NSE",
+            dataset_version="test-v1",
+            as_of_date=date(2024, 1, 21),
+        )
+    finally:
+        connection.close()
+
+    assert set(closes_by_symbol) == {
+        "INCOMPLETE",
+        "RELIANCE",
+        "TCS",
+    }
+    assert len(closes_by_symbol["RELIANCE"]) == 21
+    assert len(closes_by_symbol["TCS"]) == 21
+    assert len(closes_by_symbol["INCOMPLETE"]) == 20
+
+    assert closes_by_symbol["RELIANCE"][0] == (
+        date(2024, 1, 1),
+        Decimal(100),
+    )
+    assert closes_by_symbol["RELIANCE"][-1] == (
+        date(2024, 1, 21),
+        Decimal(120),
+    )

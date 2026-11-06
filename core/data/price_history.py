@@ -1,5 +1,6 @@
 # core/data/price_history.py
 
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
@@ -123,3 +124,71 @@ def load_symbol_closes(
             )
 
     return [(trade_date, close_price) for trade_date, close_price, _ in rows]
+
+
+def load_recent_closes_by_symbol(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    exchange: str,
+    dataset_version: str,
+    as_of_date: date,
+    limit: int = 21,
+) -> dict[str, list[tuple[date, Decimal]]]:
+    """Return up to the latest closes per symbol, ordered by symbol and date."""
+    if limit < 0:
+        raise ValueError("limit must be greater than zero.")
+
+    rows = connection.execute(
+        """
+        WITH prices_by_date AS (
+            SELECT
+                symbol,
+                trade_date,
+                MIN(close_price) AS close_price,
+                COUNT(*) AS row_count
+            FROM daily_prices
+            WHERE exchange = ?
+                AND dataset_version = ?
+                AND trade_date <= ?
+            GROUP BY symbol, trade_date
+        ),
+        recent_prices AS (
+            SELECT
+                symbol,
+                trade_date,
+                close_price,
+                row_count,
+                ROW_NUMBER() OVER (
+                    PARTITION BY symbol
+                    ORDER BY trade_date DESC
+                ) AS observation_rank
+            FROM prices_by_date
+        )
+        SELECT
+            symbol,
+            trade_date,
+            close_price,
+            row_count
+        FROM recent_prices
+        WHERE observation_rank <= ?
+        ORDER BY symbol ASC, trade_date ASC
+        """,
+        [
+            exchange.strip().upper(),
+            dataset_version,
+            as_of_date,
+            limit,
+        ],
+    ).fetchall()
+
+    closes_by_symbol: dict[str, list[tuple[date, Decimal]]] = defaultdict(list)
+
+    for symbol, trade_date, close_price, row_count in rows:
+        if row_count > 1:
+            raise ValueError(
+                f"Duplicate daily prices found for{symbol} on {trade_date.isoformat()}."
+            )
+
+        closes_by_symbol[symbol].append((trade_date, close_price))
+
+    return dict(closes_by_symbol)
