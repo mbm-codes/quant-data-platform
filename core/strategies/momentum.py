@@ -1,7 +1,7 @@
 # core/strategies/momentum.py
 
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from itertools import pairwise
 from typing import Literal
 
@@ -10,6 +10,8 @@ from core.models.backtest import (
 )
 from core.models.ranking import MomentumRankedCandidate
 from core.recommendation_evaluation import calculate_forward_return
+
+RETURN_QUANTUM = Decimal("0.00000001")
 
 
 def select_momentum_action(momentum_return: Decimal) -> Literal["BUY", "SELL", "HOLD"]:
@@ -26,13 +28,24 @@ def calculate_twenty_day_momentum(closes: list[Decimal]) -> Decimal:
     if len(closes) < 21:
         raise ValueError("At least 21 closing prices are required for 20-day momentum.")
 
-    return Decimal((closes[-1] / closes[-21]) - 1)
+    return ((closes[-1] / closes[-21]) - Decimal(1)).quantize(
+        RETURN_QUANTUM,
+        rounding=ROUND_HALF_UP,
+    )
 
 
 def calculate_momentum_score(momentum_return: Decimal) -> Decimal:
-    score = Decimal("0.5") + (momentum_return / Decimal("0.20"))
 
-    return max(Decimal(0), min(score, Decimal(1)))
+    raw_score = Decimal("0.5") + momentum_return / Decimal("0.20")
+    bounded_score = max(
+        Decimal(0),
+        min(raw_score, Decimal(1)),
+    )
+
+    return bounded_score.quantize(
+        RETURN_QUANTUM,
+        rounding=ROUND_HALF_UP,
+    )
 
 
 def build_momentum_backtest_observation(

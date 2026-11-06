@@ -23,6 +23,9 @@ from core.services.historical_inventory import (
 from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.ranking import rank_momentum_universe
+from core.services.ranking_snapshot import (
+    generate_and_record_momentum_ranking_snapshot,
+)
 from core.services.recommendation import (
     preview_momentum_recommendation as preview_momentum_recommendation_service,
 )
@@ -687,6 +690,64 @@ def rank_momentum(
                     ]
                 )
             )
+
+
+@app.command("rank-momentum-record")
+def rank_momentum_record(
+    as_of: Annotated[str, typer.Option()],
+    run_id: Annotated[str, typer.Option()],
+    input_dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+    max_price_age_days: Annotated[int, typer.Option()] = 7,
+    symbols_file: Annotated[
+        Path | None,
+        typer.Option("--symbols-file", exists=True, dir_okay=False),
+    ] = None,
+) -> None:
+    """Generate and immutably record one baseline momentum ranking run."""
+    try:
+        as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    try:
+        allowed_symbols = resolve_symbol_universe(symbols_file)
+    except ValueError as error:
+        raise typer.BadParameter(
+            str(error),
+            param_hint="--symbols-file",
+        ) from error
+
+    ranking_run_id = f"baseline_momentum:v1:NSE:{as_of_date.isoformat()}:{run_id}"
+    settings = get_settings()
+
+    try:
+        result = generate_and_record_momentum_ranking_snapshot(
+            ranking_run_id=ranking_run_id,
+            exchange="NSE",
+            as_of_date=as_of_date,
+            generated_at=datetime.now(UTC),
+            input_dataset_version=input_dataset_version,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            output_directory=settings.data_dir / "ranking_snapshots",
+            max_price_age_days=max_price_age_days,
+            allowed_symbols=allowed_symbols,
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "No canonical daily-price Parquet data exists yet."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Ranking run ID | {result.ranking_run.ranking_run_id}")
+    typer.echo(f"Eligible candidates | {result.ranking_run.eligible_candidate_count}")
+    typer.echo(f"Universe hash | {result.ranking_run.universe_hash}")
+    typer.echo(f"Recorded ranking run | {result.run_path}")
+    typer.echo(f"Recorded ranking candidates | {result.candidate_path}")
 
 
 if __name__ == "__main__":

@@ -18,8 +18,13 @@ from core.data.recommendation_evaluation_ledger import (
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
 from core.models.ranking import MomentumRankedCandidate
+from core.models.ranking_snapshot import (
+    MomentumRankingRun,
+    MomentumRankingSnapshotCandidate,
+)
 from core.models.recommendation_evaluation import RecommendationEvaluation
 from core.models.recommendations import PortfolioRecommendation
+from core.services.ranking_snapshot import RankingSnapshotWriteResult
 
 runner = CliRunner()
 
@@ -768,3 +773,86 @@ def test_rank_momentum_uses_symbols_file(
     assert "Highest momentum scores" in result.output
     assert "1 | RELIANCE | 2024-01-21 | 20.00% | 100.00% | BUY" in result.output
     assert "Lowest momentum scores" not in result.output
+
+
+def test_rank_momentum_record_writes_snapshot_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    symbols_file = tmp_path / "universe.csv"
+    symbols_file.write_text(
+        "symbol\nRELIANCE\n",
+        encoding="utf-8",
+    )
+
+    captured_arguments: dict[str, object] = {}
+
+    def fake_record_snapshot(**kwargs) -> RankingSnapshotWriteResult:
+        captured_arguments.update(kwargs)
+
+        ranking_run = MomentumRankingRun(
+            ranking_run_id=kwargs["ranking_run_id"],
+            exchange="NSE",
+            as_of_date=date(2024, 1, 21),
+            generated_at=datetime(2024, 1, 21, 12, tzinfo=UTC),
+            strategy_name="baseline_momentum",
+            strategy_version="v1",
+            input_dataset_version="test-v1",
+            universe_hash="a" * 64,
+            max_price_age_days=7,
+            eligible_candidate_count=1,
+        )
+        candidate = MomentumRankingSnapshotCandidate(
+            ranking_run_id=ranking_run.ranking_run_id,
+            rank=1,
+            exchange="NSE",
+            symbol="RELIANCE",
+            as_of_date=date(2024, 1, 21),
+            price_date=date(2024, 1, 21),
+            reference_price=Decimal(120),
+            momentum_return=Decimal("0.20"),
+            score=Decimal(1),
+            action="BUY",
+            strategy_name="baseline_momentum",
+            strategy_version="v1",
+            input_dataset_version="test-v1",
+        )
+
+        return RankingSnapshotWriteResult(
+            ranking_run=ranking_run,
+            candidates=[candidate],
+            run_path=tmp_path / "run.parquet",
+            candidate_path=tmp_path / "candidates.parquet",
+        )
+
+    monkeypatch.setattr(
+        "core.cli.generate_and_record_momentum_ranking_snapshot",
+        fake_record_snapshot,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "rank-momentum-record",
+            "--as-of",
+            "2024-01-21",
+            "--run-id",
+            "test-run",
+            "--symbols-file",
+            str(symbols_file),
+            "--input-dataset-version",
+            "test-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["allowed_symbols"] == {"RELIANCE"}
+    assert (
+        captured_arguments["ranking_run_id"]
+        == "baseline_momentum:v1:NSE:2024-01-21:test-run"
+    )
+    assert "Eligible candidates | 1" in result.output
+    assert "Recorded ranking run |" in result.output
+    assert "Recorded ranking candidates |" in result.output
