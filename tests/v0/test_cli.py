@@ -17,6 +17,7 @@ from core.data.recommendation_evaluation_ledger import (
 )
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
+from core.models.ranking import MomentumRankedCandidate
 from core.models.recommendation_evaluation import RecommendationEvaluation
 from core.models.recommendations import PortfolioRecommendation
 
@@ -708,3 +709,62 @@ def test_backtest_momentum_summary_only_hides_observation_rows(
 
         assert result.exit_code != 0
         assert "step_observations must be greater than zero" in result.output
+
+
+def test_rank_momentum_uses_symbols_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    symbols_file = tmp_path / "universe.csv"
+    symbols_file.write_text(
+        "symbol\nreliance\nTCS\n",
+        encoding="utf-8",
+    )
+
+    captured_arguments: dict[str, object] = {}
+
+    def fake_rank_momentum_universe(**kwargs) -> list[MomentumRankedCandidate]:
+        captured_arguments.update(kwargs)
+
+        return [
+            MomentumRankedCandidate(
+                rank=1,
+                exchange="NSE",
+                symbol="RELIANCE",
+                as_of_date=date(2024, 1, 21),
+                price_date=date(2024, 1, 21),
+                reference_price=Decimal(120),
+                momentum_return=Decimal("0.20"),
+                score=Decimal(1),
+                action="BUY",
+                strategy_name="baseline_momentum",
+                strategy_version="v1",
+                input_dataset_version="test-v1",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "core.cli.rank_momentum_universe",
+        fake_rank_momentum_universe,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "rank-momentum",
+            "--as-of",
+            "2024-01-21",
+            "--symbols-file",
+            str(symbols_file),
+            "--input-dataset-version",
+            "test-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["allowed_symbols"] == {"RELIANCE", "TCS"}
+    assert "Highest momentum scores" in result.output
+    assert "1 | RELIANCE | 2024-01-21 | 20.00% | 100.00% | BUY" in result.output
+    assert "Lowest momentum scores" not in result.output

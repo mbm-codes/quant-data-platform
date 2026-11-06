@@ -8,6 +8,7 @@ from typing import Literal
 from core.models.backtest import (
     MomentumBacktestObservation,
 )
+from core.models.ranking import MomentumRankedCandidate
 from core.recommendation_evaluation import calculate_forward_return
 
 
@@ -122,3 +123,64 @@ def build_momentum_backtest_observations(
         observations.append(observation)
 
     return observations
+
+
+def rank_momentum_candidates(
+    *,
+    exchange: str,
+    as_of_date: date,
+    input_dataset_version: str,
+    closes_by_symbol: dict[str, list[tuple[date, Decimal]]],
+) -> list[MomentumRankedCandidate]:
+    """Rank symbols by their latest eligible baseline-momentum score."""
+    unranked_candidates: list[tuple[str, date, Decimal, Decimal, Decimal]] = []
+
+    for symbol, closes in closes_by_symbol.items():
+        if len(closes) != 21:
+            continue
+
+        price_date, reference_price = closes[-1]
+        momentum_return = calculate_twenty_day_momentum(
+            [close_price for _, close_price in closes]
+        )
+        score = calculate_momentum_score(momentum_return)
+
+        unranked_candidates.append(
+            (
+                symbol,
+                price_date,
+                reference_price,
+                momentum_return,
+                score,
+            )
+        )
+    ordered_candidates = sorted(
+        unranked_candidates,
+        key=lambda candidate: (-candidate[3], candidate[0]),
+    )
+
+    return [
+        MomentumRankedCandidate.model_validate(
+            {
+                "rank": rank,
+                "exchange": exchange,
+                "symbol": symbol,
+                "as_of_date": as_of_date,
+                "price_date": price_date,
+                "reference_price": reference_price,
+                "momentum_return": momentum_return,
+                "score": score,
+                "action": select_momentum_action(momentum_return),
+                "strategy_name": "baseline_momentum",
+                "strategy_version": "v1",
+                "input_dataset_version": input_dataset_version,
+            }
+        )
+        for rank, (
+            symbol,
+            price_date,
+            reference_price,
+            momentum_return,
+            score,
+        ) in enumerate(ordered_candidates, start=1)
+    ]

@@ -258,3 +258,14 @@ uv run python -m core.cli backtest-momentum RELIANCE \
   --end 2025-12-31 \
   --input-dataset-version nse-bhavcopy-v1 \
   --summary-only
+
+  ### Rank momentum candidates
+
+Rank eligible NSE symbols by 20-observation momentum:
+
+```bash
+uv run python -m core.cli rank-momentum \
+  --as-of 2026-01-20 \
+  --symbols-file /path/to/nse_research_universe.csv \
+  --limit 10 \
+  --input-dataset-version nse-bhavcopy-v1
