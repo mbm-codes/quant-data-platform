@@ -74,3 +74,41 @@ def register_recommendation_evaluations_view(
         );
         """
     )
+
+
+def register_momentum_ranking_snapshot_views(
+    connection: duckdb.DuckDBPyConnection,
+    snapshot_directory: Path,
+) -> None:
+    """Expose momentum ranking snapshot Parquet files as DuckDB views."""
+    runs_glob = (
+        (snapshot_directory / "runs" / "as_of_year=*" / "*.parquet")
+        .as_posix()
+        .replace("'", "''")
+    )
+    candidates_glob = (
+        (snapshot_directory / "candidates" / "as_of_year=*" / "*.parquet")
+        .as_posix()
+        .replace("'", "''")
+    )
+
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW momentum_ranking_runs AS
+        SELECT *
+        FROM read_parquet(
+            '{runs_glob}',
+            hive_partitioning = true
+        );
+        """
+    )
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW momentum_ranking_candidates AS
+        SELECT *
+        FROM read_parquet(
+            '{candidates_glob}',
+            hive_partitioning = true
+        );
+        """
+    )

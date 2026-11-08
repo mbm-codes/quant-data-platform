@@ -23,6 +23,9 @@ from core.services.historical_inventory import (
 from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.ranking import rank_momentum_universe
+from core.services.ranking_evaluation_recording import (
+    evaluate_and_record_momentum_ranking_snapshot,
+)
 from core.services.ranking_snapshot import (
     generate_and_record_momentum_ranking_snapshot,
 )
@@ -748,6 +751,57 @@ def rank_momentum_record(
     typer.echo(f"Universe hash | {result.ranking_run.universe_hash}")
     typer.echo(f"Recorded ranking run | {result.run_path}")
     typer.echo(f"Recorded ranking candidates | {result.candidate_path}")
+
+
+@app.command("rank-momentum-evaluate")
+def rank_momentum_evaluate(
+    ranking_run_id: Annotated[str, typer.Argument()],
+    as_of: Annotated[str, typer.Option()],
+) -> None:
+    """Evaluate and record completed outcomes for a ranking snapshot."""
+    try:
+        evaluation_as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    settings = get_settings()
+
+    try:
+        result = evaluate_and_record_momentum_ranking_snapshot(
+            ranking_run_id=ranking_run_id,
+            evaluation_as_of_date=evaluation_as_of_date,
+            database_path=settings.database_path,
+            ranking_snapshots_directory=settings.data_dir / "ranking_snapshots",
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            evaluations_directory=settings.data_dir / "ranking_evaluations",
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Required ranking snapshot or canonical daily-price data does not exist."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Ranking run ID | {ranking_run_id}")
+    typer.echo(f"Completed evaluations | {result.completed_count}")
+    typer.echo(f"Pending evaluations | {result.pending_count}")
+
+    for evaluation in result.evaluations:
+        forward_return = (
+            f"{evaluation.forward_return:.2%}"
+            if evaluation.forward_return is not None
+            else "N/A"
+        )
+        typer.echo(
+            f"{evaluation.symbol} | {evaluation.action} | "
+            f"{evaluation.status} | {forward_return}"
+        )
+
+    for written_path in result.written_paths:
+        typer.echo(f"Recorded evaluation | {written_path}")
 
 
 if __name__ == "__main__":
