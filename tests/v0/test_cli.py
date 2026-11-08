@@ -18,12 +18,16 @@ from core.data.recommendation_evaluation_ledger import (
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
 from core.models.ranking import MomentumRankedCandidate
+from core.models.ranking_evaluation import MomentumRankingCandidateEvaluation
 from core.models.ranking_snapshot import (
     MomentumRankingRun,
     MomentumRankingSnapshotCandidate,
 )
 from core.models.recommendation_evaluation import RecommendationEvaluation
 from core.models.recommendations import PortfolioRecommendation
+from core.services.ranking_evaluation_recording import (
+    RankingEvaluationRecordingResult,
+)
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
 
 runner = CliRunner()
@@ -856,3 +860,72 @@ def test_rank_momentum_record_writes_snapshot_via_cli(
     assert "Eligible candidates | 1" in result.output
     assert "Recorded ranking run |" in result.output
     assert "Recorded ranking candidates |" in result.output
+
+
+def test_evaluates_and_records_ranking_snapshot_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    evaluation = MomentumRankingCandidateEvaluation(
+        ranking_run_id="ranking-run-001",
+        exchange="NSE",
+        symbol="RELIANCE",
+        rank=1,
+        action="BUY",
+        price_date=date(2024, 1, 1),
+        reference_price=Decimal(100),
+        input_dataset_version="test-v1",
+        evaluation_as_of_date=date(2024, 2, 1),
+        future_observations_found=20,
+        status="COMPLETED",
+        future_price_date=date(2024, 1, 21),
+        future_close_price=Decimal(110),
+        forward_return=Decimal("0.10"),
+    )
+
+    def fake_evaluate_and_record(**kwargs) -> RankingEvaluationRecordingResult:
+        captured_arguments.update(kwargs)
+
+        return RankingEvaluationRecordingResult(
+            evaluations=[evaluation],
+            written_paths=[
+                data_dir
+                / "ranking_evaluations"
+                / "evaluation_year=2024"
+                / "example.parquet"
+            ],
+            completed_count=1,
+            pending_count=0,
+        )
+
+    monkeypatch.setattr(
+        "core.cli.evaluate_and_record_momentum_ranking_snapshot",
+        fake_evaluate_and_record,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "rank-momentum-evaluate",
+            "ranking-run-001",
+            "--as-of",
+            "2024-02-01",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["ranking_run_id"] == "ranking-run-001"
+    assert captured_arguments["evaluation_as_of_date"] == date(2024, 2, 1)
+    assert captured_arguments["ranking_snapshots_directory"] == (
+        data_dir / "ranking_snapshots"
+    )
+    assert captured_arguments["evaluations_directory"] == (
+        data_dir / "ranking_evaluations"
+    )
+    assert "Completed evaluations | 1" in result.output
+    assert "Pending evaluations | 0" in result.output
+    assert "RELIANCE | BUY | COMPLETED | 10.00%" in result.output

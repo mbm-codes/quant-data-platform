@@ -280,3 +280,12 @@ uv run python -m core.cli rank-momentum-record \
   --run-id m11-manual-check-002 \
   --symbols-file /path/to/nse_research_universe.csv \
   --input-dataset-version nse-bhavcopy-v1
+
+  ### Evaluate a saved momentum ranking
+
+Evaluate every candidate from a previously recorded ranking snapshot:
+
+```bash
+uv run python -m core.cli rank-momentum-evaluate \
+  "baseline_momentum:v1:NSE:2026-01-20:m11-manual-check-002" \
+  --as-of 2026-02-20
