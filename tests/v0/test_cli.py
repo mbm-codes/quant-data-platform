@@ -31,7 +31,13 @@ from core.models.recommendations import PortfolioRecommendation
 from core.services.ranking_evaluation_recording import (
     RankingEvaluationRecordingResult,
 )
+from core.services.ranking_bucket_analytics import (
+    RankingBucketAnalysisResult,
+)
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
+from core.models.ranking_bucket_analytics import (
+    MomentumRankingBucketSummary,
+)
 
 runner = CliRunner()
 
@@ -998,6 +1004,107 @@ def test_prints_no_completed_ranking_evaluations_via_cli(
         app,
         [
             "ranking-evaluation-summary",
+            "ranking-run-without-outcomes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No completed ranking evaluations." in result.output
+
+
+def test_prints_ranking_bucket_summary_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    top_summary = MomentumRankingBucketSummary(
+        ranking_run_id="ranking-run-001",
+        input_dataset_version="test-v1",
+        bucket="TOP",
+        bucket_size=2,
+        rank_start=1,
+        rank_end=2,
+        completed_count=2,
+        average_forward_return=Decimal("0.06"),
+        median_forward_return=Decimal("0.06"),
+        positive_return_count=2,
+        positive_return_rate=Decimal("1"),
+        evaluation_as_of_date=date(2024, 2, 1),
+        generated_at=datetime(2024, 2, 2, tzinfo=UTC),
+    )
+    bottom_summary = MomentumRankingBucketSummary(
+        ranking_run_id="ranking-run-001",
+        input_dataset_version="test-v1",
+        bucket="BOTTOM",
+        bucket_size=2,
+        rank_start=5,
+        rank_end=6,
+        completed_count=2,
+        average_forward_return=Decimal("-0.03"),
+        median_forward_return=Decimal("-0.03"),
+        positive_return_count=0,
+        positive_return_rate=Decimal("0"),
+        evaluation_as_of_date=date(2024, 2, 1),
+        generated_at=datetime(2024, 2, 2, tzinfo=UTC),
+    )
+
+    def fake_summarize_recorded_buckets(
+        **kwargs,
+    ) -> RankingBucketAnalysisResult:
+        captured_arguments.update(kwargs)
+        return RankingBucketAnalysisResult(
+            summaries=[top_summary, bottom_summary],
+            average_forward_return_spread=Decimal("0.09"),
+        )
+
+    monkeypatch.setattr(
+        "core.cli.summarize_recorded_ranking_buckets",
+        fake_summarize_recorded_buckets,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ranking-bucket-summary",
+            "ranking-run-001",
+            "--bucket-size",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["ranking_run_id"] == "ranking-run-001"
+    assert captured_arguments["bucket_size"] == 2
+    assert captured_arguments["evaluations_directory"] == (
+        data_dir / "ranking_evaluations"
+    )
+    assert "Ranking run ID | ranking-run-001" in result.output
+    assert "Bucket size | 2" in result.output
+    assert "TOP | 1-2 | 2 | 6.00% | 6.00% | 2/2 | 100.00%" in result.output
+    assert "Average rank spread | 9.00%" in result.output
+
+def test_prints_no_completed_ranking_bucket_evaluations_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        "core.cli.summarize_recorded_ranking_buckets",
+        lambda **kwargs: RankingBucketAnalysisResult(
+            summaries=[],
+            average_forward_return_spread=None,
+        ),
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ranking-bucket-summary",
             "ranking-run-without-outcomes",
         ],
     )
