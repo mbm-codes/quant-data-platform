@@ -19,6 +19,9 @@ from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
 from core.models.ranking import MomentumRankedCandidate
 from core.models.ranking_evaluation import MomentumRankingCandidateEvaluation
+from core.models.ranking_evaluation_analytics import (
+    MomentumRankingActionSummary,
+)
 from core.models.ranking_snapshot import (
     MomentumRankingRun,
     MomentumRankingSnapshotCandidate,
@@ -929,3 +932,75 @@ def test_evaluates_and_records_ranking_snapshot_via_cli(
     assert "Completed evaluations | 1" in result.output
     assert "Pending evaluations | 0" in result.output
     assert "RELIANCE | BUY | COMPLETED | 10.00%" in result.output
+
+
+def test_prints_ranking_evaluation_summary_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    buy_summary = MomentumRankingActionSummary(
+        ranking_run_id="ranking-run-001",
+        input_dataset_version="test-v1",
+        action="BUY",
+        completed_count=2,
+        average_forward_return=Decimal("0.04"),
+        median_forward_return=Decimal("0.04"),
+        directional_correct_count=1,
+        directional_hit_rate=Decimal("0.5"),
+        evaluation_as_of_date=date(2024, 2, 1),
+        generated_at=datetime(2024, 2, 2, tzinfo=UTC),
+    )
+
+    def fake_summarize_recorded(**kwargs) -> list[MomentumRankingActionSummary]:
+        captured_arguments.update(kwargs)
+        return [buy_summary]
+
+    monkeypatch.setattr(
+        "core.cli.summarize_recorded_ranking_evaluations",
+        fake_summarize_recorded,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ranking-evaluation-summary",
+            "ranking-run-001",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["ranking_run_id"] == "ranking-run-001"
+    assert captured_arguments["database_path"] == tmp_path / "qdp.duckdb"
+    assert captured_arguments["evaluations_directory"] == (
+        data_dir / "ranking_evaluations"
+    )
+    assert "Ranking run ID | ranking-run-001" in result.output
+    assert "BUY | 2 | 4.00% | 4.00% | 1/2 | 50.00%" in result.output
+
+
+def test_prints_no_completed_ranking_evaluations_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        "core.cli.summarize_recorded_ranking_evaluations",
+        lambda **kwargs: [],
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "ranking-evaluation-summary",
+            "ranking-run-without-outcomes",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No completed ranking evaluations." in result.output

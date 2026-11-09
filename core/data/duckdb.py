@@ -112,3 +112,27 @@ def register_momentum_ranking_snapshot_views(
         );
         """
     )
+
+
+def register_ranking_candidate_evaluations_view(
+    connection: duckdb.DuckDBPyConnection,
+    evaluations_directory: Path,
+) -> None:
+    """Expose completed ranking-candidate evaluations as a DuckDB view."""
+
+    parquet_glob = (
+        (evaluations_directory / "evaluation_year=*" / "*.parquet")
+        .as_posix()
+        .replace("'", "''")
+    )
+
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW ranking_candidate_evaluations AS
+        SELECT *
+        FROM read_parquet(
+            '{parquet_glob}',
+            hive_partitioning = true
+        );
+        """
+    )
