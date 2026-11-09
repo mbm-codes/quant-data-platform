@@ -297,3 +297,12 @@ Summarize completed outcomes for a saved momentum-ranking run:
 ```bash
 uv run python -m core.cli ranking-evaluation-summary \
   "baseline_momentum:v1:NSE:2026-01-20:m11-manual-check-002"
+
+  ### Compare top and bottom ranking buckets
+
+Compare the future performance of the highest- and lowest-ranked candidates from a saved ranking run:
+
+```bash
+uv run python -m core.cli ranking-bucket-summary \
+  "baseline_momentum:v1:NSE:2026-01-20:m11-manual-check-002" \
+  --bucket-size 10

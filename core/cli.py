@@ -42,6 +42,9 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
+from core.services.ranking_bucket_analytics import (
+    summarize_recorded_ranking_buckets,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -857,6 +860,60 @@ def ranking_evaluation_summary(
             f"{directional_result} | {hit_rate}"
         )
 
+
+@app.command("ranking-bucket-summary")
+def ranking_bucket_summary(
+    ranking_run_id: Annotated[str, typer.Argument()],
+    bucket_size: Annotated[int, typer.Option()] = 10,
+) -> None:
+    """Compare completed top and bottom buckets for a ranking run."""
+    settings = get_settings()
+
+    try:
+        result = summarize_recorded_ranking_buckets(
+            ranking_run_id=ranking_run_id,
+            database_path=settings.database_path,
+            evaluations_directory=settings.data_dir / "ranking_evaluations",
+            bucket_size=bucket_size,
+            generated_at=datetime.now(UTC),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Unable to read recorded ranking evaluations."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if not result.summaries:
+        typer.echo("No completed ranking evaluations.")
+        return
+
+    typer.echo(f"Ranking run ID | {ranking_run_id}")
+    typer.echo(f"Bucket size | {bucket_size}")
+    typer.echo(
+        "Bucket | Rank range | Completed | Average forward return | "
+        "Median forward return | Positive result | Positive rate"
+    )
+
+    for summary in result.summaries:
+        positive_result = (
+            f"{summary.positive_return_count}/{summary.completed_count}"
+        )
+
+        typer.echo(
+            f"{summary.bucket} | "
+            f"{summary.rank_start}-{summary.rank_end} | "
+            f"{summary.completed_count} | "
+            f"{summary.average_forward_return:.2%} | "
+            f"{summary.median_forward_return:.2%} | "
+            f"{positive_result} | "
+            f"{summary.positive_return_rate:.2%}"
+        )
+
+    typer.echo(
+        f"Average rank spread | "
+        f"{result.average_forward_return_spread:.2%}"
+    )
 
 if __name__ == "__main__":
     app()
