@@ -23,6 +23,9 @@ from core.services.historical_inventory import (
 from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.ranking import rank_momentum_universe
+from core.services.ranking_evaluation_analytics import (
+    summarize_recorded_ranking_evaluations,
+)
 from core.services.ranking_evaluation_recording import (
     evaluate_and_record_momentum_ranking_snapshot,
 )
@@ -802,6 +805,57 @@ def rank_momentum_evaluate(
 
     for written_path in result.written_paths:
         typer.echo(f"Recorded evaluation | {written_path}")
+
+
+@app.command("ranking-evaluation-summary")
+def ranking_evaluation_summary(
+    ranking_run_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Summarize completed outcomes for one momentum-ranking run."""
+    settings = get_settings()
+
+    try:
+        summaries = summarize_recorded_ranking_evaluations(
+            ranking_run_id=ranking_run_id,
+            database_path=settings.database_path,
+            evaluations_directory=settings.data_dir / "ranking_evaluations",
+            generated_at=datetime.now(UTC),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Unable to read recorded ranking evaluations."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if not summaries:
+        typer.echo("No completed ranking evaluations.")
+        return
+
+    typer.echo(f"Ranking run ID | {ranking_run_id}")
+    typer.echo(
+        "Action | Completed | Average forward return | "
+        "Median forward return | Directional result | Hit rate"
+    )
+
+    for summary in summaries:
+        directional_result = (
+            f"{summary.directional_correct_count}/{summary.completed_count}"
+            if summary.directional_correct_count is not None
+            else "N/A"
+        )
+        hit_rate = (
+            f"{summary.directional_hit_rate:.2%}"
+            if summary.directional_hit_rate is not None
+            else "N/A"
+        )
+
+        typer.echo(
+            f"{summary.action} | {summary.completed_count} | "
+            f"{summary.average_forward_return:.2%} | "
+            f"{summary.median_forward_return:.2%} | "
+            f"{directional_result} | {hit_rate}"
+        )
 
 
 if __name__ == "__main__":

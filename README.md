@@ -289,3 +289,11 @@ Evaluate every candidate from a previously recorded ranking snapshot:
 uv run python -m core.cli rank-momentum-evaluate \
   "baseline_momentum:v1:NSE:2026-01-20:m11-manual-check-002" \
   --as-of 2026-02-20
+
+  ### Summarize a ranking evaluation
+
+Summarize completed outcomes for a saved momentum-ranking run:
+
+```bash
+uv run python -m core.cli ranking-evaluation-summary \
+  "baseline_momentum:v1:NSE:2026-01-20:m11-manual-check-002"
