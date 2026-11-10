@@ -17,6 +17,7 @@ from core.data.recommendation_evaluation_ledger import (
 )
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
+from core.models.pipeline_run import PipelineRun
 from core.models.ranking import MomentumRankedCandidate
 from core.models.ranking_backtest import (
     MomentumRankingBacktestObservation,
@@ -45,7 +46,6 @@ from core.services.ranking_evaluation_recording import (
     RankingEvaluationRecordingResult,
 )
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
-from core.models.pipeline_run import PipelineRun
 
 runner = CliRunner()
 
@@ -219,6 +219,11 @@ def test_stage_bhavcopy_stages_prices_via_cli(
     source_directory.mkdir()
     write_bhavcopy_source_file(source_directory / "sec_bhavdata_full_01032024.csv.gz")
 
+    emitted_events = []
+    monkeypatch.setattr(
+        "core.cli.emit_pipeline_log_event",
+        emitted_events.append,
+    )
     result = runner.invoke(
         app,
         [
@@ -236,9 +241,11 @@ def test_stage_bhavcopy_stages_prices_via_cli(
     assert "Files processed: 1" in result.output
     assert len(list((data_dir / "daily_prices").rglob("*.parquet"))) == 1
 
-    pipeline_run_paths = list(
-        (data_dir / "pipeline_runs").rglob("*.parquet")
-    )
+    pipeline_run_paths = list((data_dir / "pipeline_runs").rglob("*.parquet"))
+    assert [event.event for event in emitted_events] == [
+        "pipeline_started",
+        "pipeline_completed",
+    ]
 
     assert len(pipeline_run_paths) == 1
 
@@ -250,6 +257,7 @@ def test_stage_bhavcopy_stages_prices_via_cli(
     assert pipeline_run_table.column("files_processed").to_pylist() == [1]
 
     assert "Pipeline run status | COMPLETED" in result.output
+
 
 def test_stage_bhavcopy_records_completed_with_warnings_via_cli(
     tmp_path: Path,
@@ -271,6 +279,12 @@ def test_stage_bhavcopy_records_completed_with_warnings_via_cli(
         ),
     )
 
+    emitted_events = []
+
+    monkeypatch.setattr(
+        "core.cli.emit_pipeline_log_event",
+        emitted_events.append,
+    )
     result = runner.invoke(
         app,
         [
@@ -285,10 +299,12 @@ def test_stage_bhavcopy_records_completed_with_warnings_via_cli(
 
     assert result.exit_code == 0, result.output
     assert "Pipeline run status | COMPLETED_WITH_WARNINGS" in result.output
+    assert [event.event for event in emitted_events] == [
+        "pipeline_started",
+        "pipeline_completed_with_warnings",
+    ]
 
-    pipeline_run_paths = list(
-        (data_dir / "pipeline_runs").rglob("*.parquet")
-    )
+    pipeline_run_paths = list((data_dir / "pipeline_runs").rglob("*.parquet"))
     assert len(pipeline_run_paths) == 1
 
     pipeline_run_table = pq.read_table(pipeline_run_paths[0])
@@ -297,6 +313,7 @@ def test_stage_bhavcopy_records_completed_with_warnings_via_cli(
     ]
     assert pipeline_run_table.column("files_discovered").to_pylist() == [2]
     assert pipeline_run_table.column("files_processed").to_pylist() == [1]
+
 
 def test_stage_bhavcopy_records_failed_run_via_cli(
     tmp_path: Path,
@@ -314,7 +331,12 @@ def test_stage_bhavcopy_records_failed_run_via_cli(
         "core.cli.stage_bhavcopy_service",
         raise_staging_error,
     )
+    emitted_events = []
 
+    monkeypatch.setattr(
+        "core.cli.emit_pipeline_log_event",
+        emitted_events.append,
+    )
     result = runner.invoke(
         app,
         [
@@ -328,10 +350,13 @@ def test_stage_bhavcopy_records_failed_run_via_cli(
     )
 
     assert result.exit_code != 0
+    assert [event.event for event in emitted_events] == [
+        "pipeline_started",
+        "pipeline_failed",
+    ]
+    assert emitted_events[-1].error_message == ("Unable to read Bhavcopy source.")
 
-    pipeline_run_paths = list(
-        (data_dir / "pipeline_runs").rglob("*.parquet")
-    )
+    pipeline_run_paths = list((data_dir / "pipeline_runs").rglob("*.parquet"))
     assert len(pipeline_run_paths) == 1
 
     pipeline_run_table = pq.read_table(pipeline_run_paths[0])
@@ -339,6 +364,7 @@ def test_stage_bhavcopy_records_failed_run_via_cli(
     assert pipeline_run_table.column("error_message").to_pylist() == [
         "Unable to read Bhavcopy source."
     ]
+
 
 def test_recommendation_preview_via_cli(
     tmp_path: Path,
@@ -1415,14 +1441,13 @@ def test_prints_pipeline_run_status_via_cli(
 
     assert result.exit_code == 0, result.output
     assert captured_arguments["run_id"] == "stage-bhavcopy-001"
-    assert captured_arguments["pipeline_runs_directory"] == (
-        data_dir / "pipeline_runs"
-    )
+    assert captured_arguments["pipeline_runs_directory"] == (data_dir / "pipeline_runs")
     assert "Run ID | stage-bhavcopy-001" in result.output
     assert "Pipeline | stage_bhavcopy" in result.output
     assert "Status | COMPLETED" in result.output
     assert "Files | 1/1 processed" in result.output
     assert "Rows | 1818 valid | 0 rejected" in result.output
+
 
 def test_prints_pipeline_run_not_found_via_cli(
     tmp_path: Path,

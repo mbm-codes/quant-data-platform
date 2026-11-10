@@ -327,3 +327,13 @@ uv run python -m core.cli backtest-ranking-momentum \
 
 ```bash
 uv run python -m core.cli pipeline-run-status <run-id>
+
+### Structured pipeline logs
+
+Pipeline commands emit JSON lifecycle events through standard logging:
+
+```text
+pipeline_started
+pipeline_completed
+pipeline_completed_with_warnings
+pipeline_failed
