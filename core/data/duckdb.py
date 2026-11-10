@@ -136,3 +136,23 @@ def register_ranking_candidate_evaluations_view(
         );
         """
     )
+
+def register_pipeline_runs_view(
+    connection: duckdb.DuckDBPyConnection,
+    pipeline_runs_directory: Path,
+) -> None:
+    """Expose pipeline-run state records as a DuckDB view."""
+    parquet_glob = (
+        pipeline_runs_directory / "started_year=*" / "*.parquet"
+    ).as_posix().replace("'", "''")
+
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW pipeline_runs AS
+        SELECT *
+        FROM read_parquet(
+            '{parquet_glob}',
+            hive_partitioning = true
+        );
+        """
+    )

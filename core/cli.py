@@ -48,6 +48,12 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
+from core.services.pipeline_runs import (
+    complete_pipeline_run,
+    fail_pipeline_run,
+    start_pipeline_run,
+)
+from core.services.pipeline_run_status import get_pipeline_run_status
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -139,12 +145,48 @@ def stage_bhavcopy(
 ) -> None:
     """Stage official NSE bhavcopy files as canonical daily prices."""
     settings = get_settings()
-    result = stage_bhavcopy_service(
-        source_directory,
-        settings.data_dir / "daily_prices",
+    started_at = datetime.now(UTC)
+    initial_files_discovered = len(
+        list(source_directory.glob("*.csv.gz"))
+    )
+
+    pipeline_run = start_pipeline_run(
         run_id=run_id,
-        dataset_version=dataset_version,
-        ingested_at=datetime.now(UTC),
+        pipeline_name="stage_bhavcopy",
+        input_dataset_version=dataset_version,
+        output_directory=settings.data_dir / "pipeline_runs",
+        started_at=started_at,
+    )
+
+    try:
+        result = stage_bhavcopy_service(
+            source_directory,
+            settings.data_dir / "daily_prices",
+            run_id=run_id,
+            dataset_version=dataset_version,
+            ingested_at=datetime.now(UTC),
+        )
+    except Exception as error: # noqa: BLE001
+        fail_pipeline_run(
+            pipeline_run,
+            output_directory=settings.data_dir / "pipeline_runs",
+            finished_at=datetime.now(UTC),
+            error_message=str(error) or error.__class__.__name__,
+            files_discovered=initial_files_discovered,
+            files_processed=0,
+            valid_rows=0,
+            rejected_rows=0,
+        )
+        raise
+
+    completed_pipeline_run = complete_pipeline_run(
+        pipeline_run,
+        output_directory=settings.data_dir / "pipeline_runs",
+        finished_at=datetime.now(UTC),
+        files_discovered=result.files_discovered,
+        files_processed=result.files_processed,
+        valid_rows=result.valid_rows,
+        rejected_rows=0,
     )
 
     typer.echo(f"Files discovered: {result.files_discovered}")
@@ -152,7 +194,9 @@ def stage_bhavcopy(
     typer.echo(f"Files failed: {result.files_failed}")
     typer.echo(f"Duplicate files skipped: {result.duplicate_files_skipped}")
     typer.echo(f"Valid rows staged: {result.valid_rows}")
-
+    typer.echo(
+        f"Pipeline run status | {completed_pipeline_run.status}"
+    )
 
 @app.command("portfolio-positions")
 def portfolio_positions(
@@ -987,6 +1031,53 @@ def backtest_ranking_momentum(
     typer.echo(f"Average rank spread | {summary.average_rank_spread:.2%}")
     typer.echo(f"Median rank spread | {summary.median_rank_spread:.2%}")
 
+
+@app.command("pipeline-run-status")
+def pipeline_run_status(
+    run_id: Annotated[str, typer.Argument()],
+) -> None:
+    """Display the latest stored state for one pipeline run."""
+    settings = get_settings()
+
+    try:
+        pipeline_run = get_pipeline_run_status(
+            run_id=run_id,
+            database_path=settings.database_path,
+            pipeline_runs_directory=settings.data_dir / "pipeline_runs",
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Unable to read pipeline-run records."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if pipeline_run is None:
+        typer.echo("Pipeline run not found.")
+        return
+
+    finished_at = (
+        pipeline_run.finished_at.isoformat()
+        if pipeline_run.finished_at is not None
+        else "N/A"
+    )
+
+    typer.echo(f"Run ID | {pipeline_run.run_id}")
+    typer.echo(f"Pipeline | {pipeline_run.pipeline_name}")
+    typer.echo(f"Status | {pipeline_run.status}")
+    typer.echo(f"Started | {pipeline_run.started_at.isoformat()}")
+    typer.echo(f"Finished | {finished_at}")
+    typer.echo(
+        f"Files | {pipeline_run.files_processed}/"
+        f"{pipeline_run.files_discovered} processed"
+    )
+    typer.echo(
+        f"Rows | {pipeline_run.valid_rows} valid | "
+        f"{pipeline_run.rejected_rows} rejected"
+    )
+
+    if pipeline_run.error_message is not None:
+        typer.echo(f"Error | {pipeline_run.error_message}")
 
 if __name__ == "__main__":
     app()

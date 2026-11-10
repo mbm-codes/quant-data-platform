@@ -320,3 +320,10 @@ uv run python -m core.cli backtest-ranking-momentum \
   --bucket-size 2 \
   --step-observations 20 \
   --input-dataset-version nse-bhavcopy-v1
+
+### Inspect a pipeline run
+
+`stage-bhavcopy` records an operational run state for each supplied run ID.
+
+```bash
+uv run python -m core.cli pipeline-run-status <run-id>
