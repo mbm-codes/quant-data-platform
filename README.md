@@ -337,3 +337,13 @@ pipeline_started
 pipeline_completed
 pipeline_completed_with_warnings
 pipeline_failed
+
+### Check daily-price freshness
+
+Check whether canonical daily-price data is recent enough for downstream analysis:
+
+```bash
+uv run python -m core.cli daily-prices-freshness \
+  --as-of 2026-11-10 \
+  --max-age-days 3 \
+  --input-dataset-version nse-bhavcopy-v1

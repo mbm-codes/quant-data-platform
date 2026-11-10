@@ -57,6 +57,7 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
+from core.services.data_freshness import get_daily_prices_freshness
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1135,6 +1136,59 @@ def pipeline_run_status(
     if pipeline_run.error_message is not None:
         typer.echo(f"Error | {pipeline_run.error_message}")
 
+
+@app.command("daily-prices-freshness")
+def daily_prices_freshness(
+    as_of: Annotated[str, typer.Option()],
+    max_age_days: Annotated[int, typer.Option()] = 3,
+    input_dataset_version: Annotated[str, typer.Option()] = (
+        "nse-bhavcopy-v1"
+    ),
+) -> None:
+    """Check freshness of canonical daily-price data."""
+    try:
+        as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    settings = get_settings()
+
+    try:
+        freshness_result = get_daily_prices_freshness(
+            as_of_date=as_of_date,
+            max_age_days=max_age_days,
+            input_dataset_version=input_dataset_version,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            checked_at=datetime.now(UTC),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Unable to read canonical daily-price data."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    latest_trade_date = (
+        freshness_result.latest_trade_date.isoformat()
+        if freshness_result.latest_trade_date is not None
+        else "N/A"
+    )
+    actual_age_days = (
+        str(freshness_result.actual_age_days)
+        if freshness_result.actual_age_days is not None
+        else "N/A"
+    )
+
+    typer.echo(f"Dataset | {freshness_result.dataset_name}")
+    typer.echo(f"Status | {freshness_result.status}")
+    typer.echo(f"As of date | {freshness_result.as_of_date.isoformat()}")
+    typer.echo(f"Latest trade date | {latest_trade_date}")
+    typer.echo(f"Actual age days | {actual_age_days}")
+    typer.echo(f"Maximum age days | {freshness_result.max_age_days}")
 
 if __name__ == "__main__":
     logging.basicConfig(

@@ -46,6 +46,7 @@ from core.services.ranking_evaluation_recording import (
     RankingEvaluationRecordingResult,
 )
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
+from core.models.data_freshness import DataFreshnessResult
 
 runner = CliRunner()
 
@@ -1471,3 +1472,89 @@ def test_prints_pipeline_run_not_found_via_cli(
 
     assert result.exit_code == 0, result.output
     assert "Pipeline run not found." in result.output
+
+def test_prints_daily_prices_freshness_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    freshness_result = DataFreshnessResult(
+        dataset_name="daily_prices",
+        as_of_date=date(2026, 1, 20),
+        latest_trade_date=date(2026, 1, 20),
+        checked_at=datetime(2026, 1, 20, 18, tzinfo=UTC),
+        max_age_days=3,
+        actual_age_days=0,
+        status="FRESH",
+    )
+
+    def fake_get_daily_prices_freshness(
+        **kwargs,
+    ) -> DataFreshnessResult:
+        captured_arguments.update(kwargs)
+        return freshness_result
+
+    monkeypatch.setattr(
+        "core.cli.get_daily_prices_freshness",
+        fake_get_daily_prices_freshness,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "daily-prices-freshness",
+            "--as-of",
+            "2026-01-20",
+            "--max-age-days",
+            "3",
+            "--input-dataset-version",
+            "test-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["as_of_date"] == date(2026, 1, 20)
+    assert captured_arguments["daily_prices_directory"] == (
+        data_dir / "daily_prices"
+    )
+    assert "Dataset | daily_prices" in result.output
+    assert "Status | FRESH" in result.output
+    assert "Latest trade date | 2026-01-20" in result.output
+    assert "Actual age days | 0" in result.output
+
+def test_prints_missing_daily_prices_freshness_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    freshness_result = DataFreshnessResult(
+        dataset_name="daily_prices",
+        as_of_date=date(2026, 1, 20),
+        checked_at=datetime(2026, 1, 20, 18, tzinfo=UTC),
+        max_age_days=3,
+        status="MISSING",
+    )
+
+    monkeypatch.setattr(
+        "core.cli.get_daily_prices_freshness",
+        lambda **kwargs: freshness_result,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "daily-prices-freshness",
+            "--as-of",
+            "2026-01-20",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Status | MISSING" in result.output
+    assert "Latest trade date | N/A" in result.output
+    assert "Actual age days | N/A" in result.output
