@@ -354,3 +354,15 @@ Assess health of the latest recorded pipeline run:
 
 ```bash
 uv run python -m core.cli pipeline-quality stage_bhavcopy
+
+### Run the daily refresh workflow
+
+Stages NSE bhavcopy data, records the pipeline run, checks freshness, and
+checks pipeline quality in one command.
+
+```bash
+uv run python -m core.cli daily-refresh \
+  data_sources/nse/nse_bhavcopy_from_nov_2023 \
+  --run-id daily-refresh-001 \
+  --as-of 2026-01-20 \
+  --dataset-version nse-bhavcopy-v1
