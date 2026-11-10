@@ -47,6 +47,7 @@ from core.services.ranking_evaluation_recording import (
 )
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
 from core.models.data_freshness import DataFreshnessResult
+from core.models.pipeline_quality import PipelineQualityResult
 
 runner = CliRunner()
 
@@ -1558,3 +1559,93 @@ def test_prints_missing_daily_prices_freshness_via_cli(
     assert "Status | MISSING" in result.output
     assert "Latest trade date | N/A" in result.output
     assert "Actual age days | N/A" in result.output
+
+def test_prints_pipeline_quality_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    quality_result = PipelineQualityResult(
+        pipeline_name="stage_bhavcopy",
+        latest_run_id="stage-bhavcopy-001",
+        latest_run_status="COMPLETED",
+        files_discovered=1,
+        files_processed=1,
+        valid_rows=1_818,
+        rejected_rows=0,
+        rejection_rate=Decimal("0"),
+        warning_rejection_rate=Decimal("0.01"),
+        critical_rejection_rate=Decimal("0.05"),
+        status="HEALTHY",
+        checked_at=datetime(2026, 1, 20, 18, tzinfo=UTC),
+    )
+
+    def fake_get_pipeline_quality(
+        **kwargs,
+    ) -> PipelineQualityResult:
+        captured_arguments.update(kwargs)
+        return quality_result
+
+    monkeypatch.setattr(
+        "core.cli.get_pipeline_quality",
+        fake_get_pipeline_quality,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pipeline-quality",
+            "stage_bhavcopy",
+            "--warning-rejection-rate",
+            "0.01",
+            "--critical-rejection-rate",
+            "0.05",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["pipeline_name"] == "stage_bhavcopy"
+    assert captured_arguments["pipeline_runs_directory"] == (
+        data_dir / "pipeline_runs"
+    )
+    assert captured_arguments["warning_rejection_rate"] == Decimal("0.01")
+    assert captured_arguments["critical_rejection_rate"] == Decimal("0.05")
+    assert "Pipeline | stage_bhavcopy" in result.output
+    assert "Quality status | HEALTHY" in result.output
+    assert "Rejection rate | 0.00%" in result.output
+
+def test_prints_missing_pipeline_quality_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    quality_result = PipelineQualityResult(
+        pipeline_name="stage_bhavcopy",
+        warning_rejection_rate=Decimal("0.01"),
+        critical_rejection_rate=Decimal("0.05"),
+        status="MISSING",
+        checked_at=datetime(2026, 1, 20, 18, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        "core.cli.get_pipeline_quality",
+        lambda **kwargs: quality_result,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pipeline-quality",
+            "stage_bhavcopy",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Quality status | MISSING" in result.output
+    assert "Latest run ID | N/A" in result.output
+    assert "Rejection rate | N/A" in result.output

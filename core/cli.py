@@ -2,7 +2,7 @@
 
 import logging
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated
 
@@ -58,6 +58,7 @@ from core.services.recommendation_recording import (
 )
 from core.services.universe import resolve_symbol_universe
 from core.services.data_freshness import get_daily_prices_freshness
+from core.services.pipeline_quality import get_pipeline_quality
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1189,6 +1190,75 @@ def daily_prices_freshness(
     typer.echo(f"Latest trade date | {latest_trade_date}")
     typer.echo(f"Actual age days | {actual_age_days}")
     typer.echo(f"Maximum age days | {freshness_result.max_age_days}")
+
+@app.command("pipeline-quality")
+def pipeline_quality(
+    pipeline_name: Annotated[str, typer.Argument()],
+    warning_rejection_rate: Annotated[
+        str,
+        typer.Option(),
+    ] = "0.01",
+    critical_rejection_rate: Annotated[
+        str,
+        typer.Option(),
+    ] = "0.05",
+) -> None:
+    """Assess quality of the latest recorded pipeline run."""
+    try:
+        warning_rate = Decimal(warning_rejection_rate)
+        critical_rate = Decimal(critical_rejection_rate)
+    except InvalidOperation as error:
+        raise typer.BadParameter(
+            "Rejection-rate thresholds must be decimal values."
+        ) from error
+    settings = get_settings()
+
+    try:
+        quality_result = get_pipeline_quality(
+            pipeline_name=pipeline_name,
+            warning_rejection_rate=warning_rate,
+            critical_rejection_rate=critical_rate,
+            database_path=settings.database_path,
+            pipeline_runs_directory=settings.data_dir / "pipeline_runs",
+            checked_at=datetime.now(UTC),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "Unable to read pipeline-run records."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    latest_run_id = quality_result.latest_run_id or "N/A"
+    latest_run_status = quality_result.latest_run_status or "N/A"
+    files = (
+        f"{quality_result.files_processed}/"
+        f"{quality_result.files_discovered}"
+        if quality_result.files_processed is not None
+        and quality_result.files_discovered is not None
+        else "N/A"
+    )
+    rows = (
+        f"{quality_result.valid_rows} valid | "
+        f"{quality_result.rejected_rows} rejected"
+        if quality_result.valid_rows is not None
+        and quality_result.rejected_rows is not None
+        else "N/A"
+    )
+    rejection_rate = (
+        f"{quality_result.rejection_rate:.2%}"
+        if quality_result.rejection_rate is not None
+        else "N/A"
+    )
+
+    typer.echo(f"Pipeline | {quality_result.pipeline_name}")
+    typer.echo(f"Quality status | {quality_result.status}")
+    typer.echo(f"Latest run ID | {latest_run_id}")
+    typer.echo(f"Latest run status | {latest_run_status}")
+    typer.echo(f"Files | {files}")
+    typer.echo(f"Rows | {rows}")
+    typer.echo(f"Rejection rate | {rejection_rate}")
+
 
 if __name__ == "__main__":
     logging.basicConfig(

@@ -347,3 +347,10 @@ uv run python -m core.cli daily-prices-freshness \
   --as-of 2026-11-10 \
   --max-age-days 3 \
   --input-dataset-version nse-bhavcopy-v1
+
+### Check pipeline quality
+
+Assess health of the latest recorded pipeline run:
+
+```bash
+uv run python -m core.cli pipeline-quality stage_bhavcopy
