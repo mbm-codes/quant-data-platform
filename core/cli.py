@@ -1,5 +1,6 @@
 # core/cli.py
 
+import logging
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -11,6 +12,8 @@ import typer
 from core.backtest_analytics import summarize_momentum_backtest
 from core.config.settings import get_settings
 from core.data.duckdb import connect, register_daily_prices_view
+from core.models.pipeline_log_event import PipelineLogEvent
+from core.observability.pipeline_logging import emit_pipeline_log_event
 from core.services.backtest import backtest_momentum
 from core.services.bhavcopy_staging import stage_bhavcopy as stage_bhavcopy_service
 from core.services.csv_loader import load_csv as load_csv_service
@@ -21,6 +24,12 @@ from core.services.historical_inventory import (
     inventory_historical as inventory_historical_service,
 )
 from core.services.historical_staging import stage_kaggle_historical_directory
+from core.services.pipeline_run_status import get_pipeline_run_status
+from core.services.pipeline_runs import (
+    complete_pipeline_run,
+    fail_pipeline_run,
+    start_pipeline_run,
+)
 from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.ranking import rank_momentum_universe
 from core.services.ranking_backtest import (
@@ -48,12 +57,6 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
-from core.services.pipeline_runs import (
-    complete_pipeline_run,
-    fail_pipeline_run,
-    start_pipeline_run,
-)
-from core.services.pipeline_run_status import get_pipeline_run_status
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -146,9 +149,7 @@ def stage_bhavcopy(
     """Stage official NSE bhavcopy files as canonical daily prices."""
     settings = get_settings()
     started_at = datetime.now(UTC)
-    initial_files_discovered = len(
-        list(source_directory.glob("*.csv.gz"))
-    )
+    initial_files_discovered = len(list(source_directory.glob("*.csv.gz")))
 
     pipeline_run = start_pipeline_run(
         run_id=run_id,
@@ -156,6 +157,20 @@ def stage_bhavcopy(
         input_dataset_version=dataset_version,
         output_directory=settings.data_dir / "pipeline_runs",
         started_at=started_at,
+    )
+    emit_pipeline_log_event(
+        PipelineLogEvent(
+            timestamp=started_at,
+            level="INFO",
+            event="pipeline_started",
+            run_id=pipeline_run.run_id,
+            pipeline_name=pipeline_run.pipeline_name,
+            status=pipeline_run.status,
+            files_discovered=0,
+            files_processed=0,
+            valid_rows=0,
+            rejected_rows=0,
+        )
     )
 
     try:
@@ -166,8 +181,8 @@ def stage_bhavcopy(
             dataset_version=dataset_version,
             ingested_at=datetime.now(UTC),
         )
-    except Exception as error: # noqa: BLE001
-        fail_pipeline_run(
+    except Exception as error:
+        failed_pipeline_run = fail_pipeline_run(
             pipeline_run,
             output_directory=settings.data_dir / "pipeline_runs",
             finished_at=datetime.now(UTC),
@@ -176,6 +191,24 @@ def stage_bhavcopy(
             files_processed=0,
             valid_rows=0,
             rejected_rows=0,
+        )
+        failed_at = failed_pipeline_run.finished_at
+        if failed_at is None:
+            raise RuntimeError("Failed pipeline run is missing finished_at.")
+        emit_pipeline_log_event(
+            PipelineLogEvent(
+                timestamp=failed_at,
+                level="ERROR",
+                event="pipeline_failed",
+                run_id=failed_pipeline_run.run_id,
+                pipeline_name=failed_pipeline_run.pipeline_name,
+                status=failed_pipeline_run.status,
+                files_discovered=failed_pipeline_run.files_discovered,
+                files_processed=failed_pipeline_run.files_processed,
+                valid_rows=failed_pipeline_run.valid_rows,
+                rejected_rows=failed_pipeline_run.rejected_rows,
+                error_message=failed_pipeline_run.error_message,
+            )
         )
         raise
 
@@ -188,15 +221,40 @@ def stage_bhavcopy(
         valid_rows=result.valid_rows,
         rejected_rows=0,
     )
+    completion_event = (
+        "pipeline_completed"
+        if completed_pipeline_run.status == "COMPLETED"
+        else "pipeline_completed_with_warnings"
+    )
+    completion_level = (
+        "INFO" if completed_pipeline_run.status == "COMPLETED" else "WARNING"
+    )
+    completed_at = completed_pipeline_run.finished_at
+    if completed_at is None:
+        raise RuntimeError("Completed pipeline run is missing finished_at.")
+
+    emit_pipeline_log_event(
+        PipelineLogEvent(
+            timestamp=completed_at,
+            level=completion_level,
+            event=completion_event,
+            run_id=completed_pipeline_run.run_id,
+            pipeline_name=completed_pipeline_run.pipeline_name,
+            status=completed_pipeline_run.status,
+            files_discovered=completed_pipeline_run.files_discovered,
+            files_processed=completed_pipeline_run.files_processed,
+            valid_rows=completed_pipeline_run.valid_rows,
+            rejected_rows=completed_pipeline_run.rejected_rows,
+        )
+    )
 
     typer.echo(f"Files discovered: {result.files_discovered}")
     typer.echo(f"Files processed: {result.files_processed}")
     typer.echo(f"Files failed: {result.files_failed}")
     typer.echo(f"Duplicate files skipped: {result.duplicate_files_skipped}")
     typer.echo(f"Valid rows staged: {result.valid_rows}")
-    typer.echo(
-        f"Pipeline run status | {completed_pipeline_run.status}"
-    )
+    typer.echo(f"Pipeline run status | {completed_pipeline_run.status}")
+
 
 @app.command("portfolio-positions")
 def portfolio_positions(
@@ -1046,9 +1104,7 @@ def pipeline_run_status(
             pipeline_runs_directory=settings.data_dir / "pipeline_runs",
         )
     except duckdb.IOException as error:
-        raise typer.BadParameter(
-            "Unable to read pipeline-run records."
-        ) from error
+        raise typer.BadParameter("Unable to read pipeline-run records.") from error
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
 
@@ -1079,5 +1135,10 @@ def pipeline_run_status(
     if pipeline_run.error_message is not None:
         typer.echo(f"Error | {pipeline_run.error_message}")
 
+
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+    )
     app()
