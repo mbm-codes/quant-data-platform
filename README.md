@@ -306,3 +306,17 @@ Compare the future performance of the highest- and lowest-ranked candidates from
 uv run python -m core.cli ranking-bucket-summary \
   "baseline_momentum:v1:NSE:2026-01-20:m11-manual-check-002" \
   --bucket-size 10
+
+  ### Backtest momentum ranking quality
+
+Run a rolling historical test of whether top-ranked stocks outperform bottom-ranked stocks:
+
+```bash
+uv run python -m core.cli backtest-ranking-momentum \
+  --start 2024-01-02 \
+  --end 2024-12-31 \
+  --evaluation-as-of 2025-02-15 \
+  --symbols-file /tmp/nse_research_universe.csv \
+  --bucket-size 2 \
+  --step-observations 20 \
+  --input-dataset-version nse-bhavcopy-v1

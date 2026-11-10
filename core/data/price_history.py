@@ -192,3 +192,48 @@ def load_recent_closes_by_symbol(
         closes_by_symbol[symbol].append((trade_date, close_price))
 
     return dict(closes_by_symbol)
+
+
+def load_historical_closes_by_symbol(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    exchange: str,
+    dataset_version: str,
+    evaluation_as_of_date: date,
+    allowed_symbols: set[str] | None,
+) -> dict[str, list[tuple[date, Decimal]]]:
+    """Load ordered daily closes for a universe up to an evaluation cutoff."""
+    if allowed_symbols is not None and not allowed_symbols:
+        return {}
+
+    sql = """
+        SELECT symbol, trade_date, close_price
+        FROM daily_prices
+        WHERE exchange = ?
+          AND dataset_version = ?
+          AND trade_date <= ?
+    """
+    parameters: list[object] = [
+        exchange.strip().upper(),
+        dataset_version,
+        evaluation_as_of_date,
+    ]
+
+    if allowed_symbols is not None:
+        normalized_symbols = sorted(
+            symbol.strip().upper() for symbol in allowed_symbols
+        )
+        placeholders = ", ".join("?" for _ in normalized_symbols)
+        sql += f" AND symbol IN ({placeholders})"
+        parameters.extend(normalized_symbols)
+
+    sql += " ORDER BY symbol, trade_date"
+
+    rows = connection.execute(sql, parameters).fetchall()
+
+    closes_by_symbol: dict[str, list[tuple[date, Decimal]]] = {}
+
+    for symbol, trade_date, close_price in rows:
+        closes_by_symbol.setdefault(symbol, []).append((trade_date, close_price))
+
+    return closes_by_symbol

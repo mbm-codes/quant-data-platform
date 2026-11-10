@@ -9,6 +9,7 @@ from core.data.duckdb import connect, register_daily_prices_view
 from core.data.parquet import write_daily_prices_parquet
 from core.data.price_history import (
     load_future_closes,
+    load_historical_closes_by_symbol,
     load_recent_closes,
     load_recent_closes_by_symbol,
     load_symbol_closes,
@@ -16,10 +17,16 @@ from core.data.price_history import (
 from core.models.daily_prices import DailyPrice
 
 
-def make_price(trade_date: date, close_price: Decimal) -> DailyPrice:
+def make_price(
+    trade_date: date,
+    close_price: Decimal,
+    *,
+    symbol: str = "RELIANCE",
+    dataset_version: str = "test-v1",
+) -> DailyPrice:
     return DailyPrice(
         exchange="NSE",
-        symbol="RELIANCE",
+        symbol=symbol,
         trade_date=trade_date,
         open_price=close_price,
         high_price=close_price + Decimal(1),
@@ -27,7 +34,7 @@ def make_price(trade_date: date, close_price: Decimal) -> DailyPrice:
         close_price=close_price,
         volume_qty=1_000,
         source_name="test-source",
-        source_file="prices.csv",
+        source_file=f"{trade_date.isoformat()}.csv",
         source_hash="test-source-hash",
         ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
         run_id="test-run",
@@ -425,3 +432,70 @@ def test_load_recent_closes_by_symbol_returns_each_symbol_window(
         date(2024, 1, 21),
         Decimal(120),
     )
+
+
+def test_loads_historical_closes_for_allowed_symbols(
+    tmp_path: Path,
+) -> None:
+    daily_prices_directory = tmp_path / "daily_prices"
+
+    write_daily_prices_parquet(
+        [
+            make_price(
+                symbol="ALPHA",
+                trade_date=date(2024, 1, 1),
+                close_price=Decimal(100),
+            ),
+            make_price(
+                symbol="ALPHA",
+                trade_date=date(2024, 1, 2),
+                close_price=Decimal(101),
+            ),
+            make_price(
+                symbol="ALPHA",
+                trade_date=date(2024, 1, 3),
+                close_price=Decimal(102),
+            ),
+            make_price(
+                symbol="BETA",
+                trade_date=date(2024, 1, 1),
+                close_price=Decimal(200),
+            ),
+            make_price(
+                symbol="BETA",
+                trade_date=date(2024, 1, 2),
+                close_price=Decimal(201),
+            ),
+            make_price(
+                symbol="GAMMA",
+                trade_date=date(2024, 1, 1),
+                close_price=Decimal(300),
+            ),
+        ],
+        daily_prices_directory,
+    )
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    try:
+        register_daily_prices_view(connection, daily_prices_directory)
+
+        closes_by_symbol = load_historical_closes_by_symbol(
+            connection,
+            exchange="NSE",
+            dataset_version="test-v1",
+            evaluation_as_of_date=date(2024, 1, 2),
+            allowed_symbols={"ALPHA", "BETA"},
+        )
+    finally:
+        connection.close()
+
+    assert closes_by_symbol == {
+        "ALPHA": [
+            (date(2024, 1, 1), Decimal("100.00000000")),
+            (date(2024, 1, 2), Decimal("101.00000000")),
+        ],
+        "BETA": [
+            (date(2024, 1, 1), Decimal("200.00000000")),
+            (date(2024, 1, 2), Decimal("201.00000000")),
+        ],
+    }
