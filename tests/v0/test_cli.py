@@ -48,6 +48,7 @@ from core.services.ranking_evaluation_recording import (
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
 from core.models.data_freshness import DataFreshnessResult
 from core.models.pipeline_quality import PipelineQualityResult
+from core.models.daily_refresh import DailyRefreshResult
 
 runner = CliRunner()
 
@@ -1649,3 +1650,112 @@ def test_prints_missing_pipeline_quality_via_cli(
     assert "Quality status | MISSING" in result.output
     assert "Latest run ID | N/A" in result.output
     assert "Rejection rate | N/A" in result.output
+
+def test_runs_daily_refresh_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    refresh_result = DailyRefreshResult(
+        run_id="daily-refresh-001",
+        status="COMPLETED",
+        started_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        files_discovered=2,
+        files_processed=2,
+        files_failed=0,
+        duplicate_files_skipped=0,
+        valid_rows=3_000,
+        rejected_rows=0,
+        freshness_status="FRESH",
+        quality_status="HEALTHY",
+    )
+
+    def fake_run_daily_refresh(**kwargs):
+        captured_arguments.update(kwargs)
+        return refresh_result
+
+    monkeypatch.setattr(
+        "core.cli.run_daily_refresh",
+        fake_run_daily_refresh,
+    )
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "daily-refresh",
+            str(source_directory),
+            "--run-id",
+            "daily-refresh-001",
+            "--as-of",
+            "2026-01-20",
+            "--dataset-version",
+            "nse-bhavcopy-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Run ID | daily-refresh-001" in result.output
+    assert "Refresh status | COMPLETED" in result.output
+    assert "Freshness status | FRESH" in result.output
+    assert "Quality status | HEALTHY" in result.output
+
+    assert captured_arguments["run_id"] == "daily-refresh-001"
+    assert captured_arguments["as_of_date"] == date(2026, 1, 20)
+    assert captured_arguments["dataset_version"] == "nse-bhavcopy-v1"
+
+
+def test_daily_refresh_exits_nonzero_when_quality_gate_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    refresh_result = DailyRefreshResult(
+        run_id="daily-refresh-failed-001",
+        status="FAILED",
+        started_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        files_discovered=2,
+        files_processed=2,
+        files_failed=0,
+        duplicate_files_skipped=0,
+        valid_rows=3_000,
+        rejected_rows=0,
+        freshness_status="STALE",
+        quality_status="HEALTHY",
+        error_message="Freshness check failed with status STALE.",
+    )
+
+    def fake_run_daily_refresh(**_kwargs):
+        return refresh_result
+
+    monkeypatch.setattr(
+        "core.cli.run_daily_refresh",
+        fake_run_daily_refresh,
+    )
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "daily-refresh",
+            str(source_directory),
+            "--run-id",
+            "daily-refresh-failed-001",
+            "--as-of",
+            "2026-01-20",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Refresh status | FAILED" in result.output
+    assert "Freshness status | STALE" in result.output
+    assert "Quality status | HEALTHY" in result.output

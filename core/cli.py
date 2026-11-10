@@ -59,6 +59,8 @@ from core.services.recommendation_recording import (
 from core.services.universe import resolve_symbol_universe
 from core.services.data_freshness import get_daily_prices_freshness
 from core.services.pipeline_quality import get_pipeline_quality
+from core.services.daily_refresh import run_daily_refresh
+
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1259,6 +1261,67 @@ def pipeline_quality(
     typer.echo(f"Rows | {rows}")
     typer.echo(f"Rejection rate | {rejection_rate}")
 
+
+@app.command("daily-refresh")
+def daily_refresh(
+    source_directory: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=False, dir_okay=True),
+    ],
+    run_id: Annotated[str, typer.Option()],
+    as_of: Annotated[str, typer.Option()],
+    dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+    max_freshness_age_days: Annotated[int, typer.Option()] = 3,
+    warning_rejection_rate: Annotated[str, typer.Option()] = "0.01",
+    critical_rejection_rate: Annotated[str, typer.Option()] = "0.05",
+) -> None:
+    """Stage bhavcopy data and validate its operational quality."""
+    try:
+        as_of_date = date.fromisoformat(as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD.",
+            param_hint="--as-of",
+        ) from error
+
+    try:
+        warning_rate = Decimal(warning_rejection_rate)
+        critical_rate = Decimal(critical_rejection_rate)
+    except InvalidOperation as error:
+        raise typer.BadParameter(
+            "Rejection-rate thresholds must be decimal values."
+        ) from error
+
+    settings = get_settings()
+
+    try:
+        result = run_daily_refresh(
+            source_directory=source_directory,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            database_path=settings.database_path,
+            pipeline_runs_directory=settings.data_dir / "pipeline_runs",
+            run_id=run_id,
+            dataset_version=dataset_version,
+            ingested_at=datetime.now(UTC),
+            as_of_date=as_of_date,
+            max_freshness_age_days=max_freshness_age_days,
+            warning_rejection_rate=warning_rate,
+            critical_rejection_rate=critical_rate,
+        )
+    except (OSError, ValueError, duckdb.IOException) as error:
+        raise typer.BadParameter(str(error)) from error
+
+    typer.echo(f"Run ID | {result.run_id}")
+    typer.echo(f"Refresh status | {result.status}")
+    typer.echo(f"Freshness status | {result.freshness_status}")
+    typer.echo(f"Quality status | {result.quality_status}")
+    typer.echo(
+        f"Rows | {result.valid_rows} valid | "
+        f"{result.rejected_rows} rejected"
+    )
+
+    if result.status == "FAILED":
+        raise typer.Exit(code=1)
 
 if __name__ == "__main__":
     logging.basicConfig(
