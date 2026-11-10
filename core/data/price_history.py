@@ -237,3 +237,28 @@ def load_historical_closes_by_symbol(
         closes_by_symbol.setdefault(symbol, []).append((trade_date, close_price))
 
     return closes_by_symbol
+
+def load_latest_trade_date(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    exchange: str,
+    dataset_version: str,
+) -> date | None:
+    """Return the newest canonical trade date for one dataset version."""
+    row = connection.execute(
+        """
+        SELECT MAX(trade_date)
+        FROM daily_prices
+        WHERE exchange = ?
+          AND dataset_version = ?
+        """,
+        [
+            exchange.strip().upper(),
+            dataset_version,
+        ],
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return row[0]

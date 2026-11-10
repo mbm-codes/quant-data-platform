@@ -15,7 +15,7 @@ from core.data.price_history import (
     load_symbol_closes,
 )
 from core.models.daily_prices import DailyPrice
-
+from core.data.price_history import load_latest_trade_date
 
 def make_price(
     trade_date: date,
@@ -38,7 +38,7 @@ def make_price(
         source_hash="test-source-hash",
         ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
         run_id="test-run",
-        dataset_version="test-v1",
+        dataset_version=dataset_version,
     )
 
 
@@ -499,3 +499,44 @@ def test_loads_historical_closes_for_allowed_symbols(
             (date(2024, 1, 2), Decimal("201.00000000")),
         ],
     }
+
+def test_loads_latest_trade_date_for_dataset_version(
+    tmp_path: Path,
+) -> None:
+    daily_prices_directory = tmp_path / "daily_prices"
+
+    write_daily_prices_parquet(
+        [
+            make_price(
+                date(2026, 1, 18),
+                Decimal("100"),
+                symbol="ALPHA",
+            ),
+            make_price(
+                date(2026, 1, 20),
+                Decimal("101"),
+                symbol="ALPHA",
+            ),
+            make_price(
+                date(2026, 1, 21),
+                Decimal("102"),
+                symbol="ALPHA",
+                dataset_version="other-version",
+            ),
+        ],
+        daily_prices_directory,
+    )
+
+    connection = connect(tmp_path / "qdp.duckdb")
+    try:
+        register_daily_prices_view(connection, daily_prices_directory)
+
+        latest_trade_date = load_latest_trade_date(
+            connection,
+            exchange="NSE",
+            dataset_version="test-v1",
+        )
+    finally:
+        connection.close()
+
+    assert latest_trade_date == date(2026, 1, 20)
