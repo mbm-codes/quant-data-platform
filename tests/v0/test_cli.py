@@ -45,6 +45,7 @@ from core.services.ranking_evaluation_recording import (
     RankingEvaluationRecordingResult,
 )
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
+from core.models.pipeline_run import PipelineRun
 
 runner = CliRunner()
 
@@ -235,6 +236,109 @@ def test_stage_bhavcopy_stages_prices_via_cli(
     assert "Files processed: 1" in result.output
     assert len(list((data_dir / "daily_prices").rglob("*.parquet"))) == 1
 
+    pipeline_run_paths = list(
+        (data_dir / "pipeline_runs").rglob("*.parquet")
+    )
+
+    assert len(pipeline_run_paths) == 1
+
+    pipeline_run_table = pq.read_table(pipeline_run_paths[0])
+    assert pipeline_run_table.column("run_id").to_pylist() == ["test-run"]
+    assert pipeline_run_table.column("pipeline_name").to_pylist() == ["stage_bhavcopy"]
+    assert pipeline_run_table.column("status").to_pylist() == ["COMPLETED"]
+    assert pipeline_run_table.column("files_discovered").to_pylist() == [1]
+    assert pipeline_run_table.column("files_processed").to_pylist() == [1]
+
+    assert "Pipeline run status | COMPLETED" in result.output
+
+def test_stage_bhavcopy_records_completed_with_warnings_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+
+    monkeypatch.setattr(
+        "core.cli.stage_bhavcopy_service",
+        lambda *args, **kwargs: SimpleNamespace(
+            files_discovered=2,
+            files_processed=1,
+            files_failed=1,
+            duplicate_files_skipped=0,
+            valid_rows=1_818,
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "stage-bhavcopy",
+            str(source_directory),
+            "--run-id",
+            "warning-run",
+            "--dataset-version",
+            "nse-bhavcopy-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Pipeline run status | COMPLETED_WITH_WARNINGS" in result.output
+
+    pipeline_run_paths = list(
+        (data_dir / "pipeline_runs").rglob("*.parquet")
+    )
+    assert len(pipeline_run_paths) == 1
+
+    pipeline_run_table = pq.read_table(pipeline_run_paths[0])
+    assert pipeline_run_table.column("status").to_pylist() == [
+        "COMPLETED_WITH_WARNINGS"
+    ]
+    assert pipeline_run_table.column("files_discovered").to_pylist() == [2]
+    assert pipeline_run_table.column("files_processed").to_pylist() == [1]
+
+def test_stage_bhavcopy_records_failed_run_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+
+    def raise_staging_error(*args, **kwargs) -> None:
+        raise OSError("Unable to read Bhavcopy source.")
+
+    monkeypatch.setattr(
+        "core.cli.stage_bhavcopy_service",
+        raise_staging_error,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "stage-bhavcopy",
+            str(source_directory),
+            "--run-id",
+            "failed-run",
+            "--dataset-version",
+            "nse-bhavcopy-v1",
+        ],
+    )
+
+    assert result.exit_code != 0
+
+    pipeline_run_paths = list(
+        (data_dir / "pipeline_runs").rglob("*.parquet")
+    )
+    assert len(pipeline_run_paths) == 1
+
+    pipeline_run_table = pq.read_table(pipeline_run_paths[0])
+    assert pipeline_run_table.column("status").to_pylist() == ["FAILED"]
+    assert pipeline_run_table.column("error_message").to_pylist() == [
+        "Unable to read Bhavcopy source."
+    ]
 
 def test_recommendation_preview_via_cli(
     tmp_path: Path,
@@ -1269,3 +1373,76 @@ def test_prints_no_completed_ranking_dates_via_cli(
 
     assert result.exit_code == 0, result.output
     assert "No completed ranking dates." in result.output
+
+
+def test_prints_pipeline_run_status_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    pipeline_run = PipelineRun(
+        run_id="stage-bhavcopy-001",
+        pipeline_name="stage_bhavcopy",
+        input_dataset_version="nse-bhavcopy-v1",
+        status="COMPLETED",
+        started_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        files_discovered=1,
+        files_processed=1,
+        valid_rows=1_818,
+        rejected_rows=0,
+    )
+
+    def fake_get_pipeline_run_status(**kwargs) -> PipelineRun:
+        captured_arguments.update(kwargs)
+        return pipeline_run
+
+    monkeypatch.setattr(
+        "core.cli.get_pipeline_run_status",
+        fake_get_pipeline_run_status,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pipeline-run-status",
+            "stage-bhavcopy-001",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["run_id"] == "stage-bhavcopy-001"
+    assert captured_arguments["pipeline_runs_directory"] == (
+        data_dir / "pipeline_runs"
+    )
+    assert "Run ID | stage-bhavcopy-001" in result.output
+    assert "Pipeline | stage_bhavcopy" in result.output
+    assert "Status | COMPLETED" in result.output
+    assert "Files | 1/1 processed" in result.output
+    assert "Rows | 1818 valid | 0 rejected" in result.output
+
+def test_prints_pipeline_run_not_found_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        "core.cli.get_pipeline_run_status",
+        lambda **kwargs: None,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "pipeline-run-status",
+            "missing-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Pipeline run not found." in result.output
