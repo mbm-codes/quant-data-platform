@@ -23,6 +23,12 @@ from core.services.historical_inventory import (
 from core.services.historical_staging import stage_kaggle_historical_directory
 from core.services.portfolio import get_portfolio_positions, value_portfolio
 from core.services.ranking import rank_momentum_universe
+from core.services.ranking_backtest import (
+    run_momentum_ranking_backtest,
+)
+from core.services.ranking_bucket_analytics import (
+    summarize_recorded_ranking_buckets,
+)
 from core.services.ranking_evaluation_analytics import (
     summarize_recorded_ranking_evaluations,
 )
@@ -42,9 +48,6 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
-from core.services.ranking_bucket_analytics import (
-    summarize_recorded_ranking_buckets,
-)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -896,9 +899,7 @@ def ranking_bucket_summary(
     )
 
     for summary in result.summaries:
-        positive_result = (
-            f"{summary.positive_return_count}/{summary.completed_count}"
-        )
+        positive_result = f"{summary.positive_return_count}/{summary.completed_count}"
 
         typer.echo(
             f"{summary.bucket} | "
@@ -910,10 +911,82 @@ def ranking_bucket_summary(
             f"{summary.positive_return_rate:.2%}"
         )
 
+    typer.echo(f"Average rank spread | {result.average_forward_return_spread:.2%}")
+
+
+@app.command("backtest-ranking-momentum")
+def backtest_ranking_momentum(
+    start: Annotated[str, typer.Option()],
+    end: Annotated[str, typer.Option()],
+    evaluation_as_of: Annotated[str, typer.Option()],
+    symbols_file: Annotated[
+        Path,
+        typer.Option(exists=True, dir_okay=False),
+    ],
+    bucket_size: Annotated[int, typer.Option()] = 10,
+    step_observations: Annotated[int, typer.Option()] = 20,
+    input_dataset_version: Annotated[str, typer.Option()] = ("nse-bhavcopy-v1"),
+) -> None:
+    """Backtest top-versus-bottom momentum ranking performance."""
+    try:
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+        evaluation_as_of_date = date.fromisoformat(evaluation_as_of)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "Use ISO format YYYY-MM-DD for all date options."
+        ) from error
+
+    allowed_symbols = resolve_symbol_universe(symbols_file)
+    if allowed_symbols is None:
+        raise typer.BadParameter("A symbols file is required.")
+
+    settings = get_settings()
+
+    try:
+        result = run_momentum_ranking_backtest(
+            exchange="NSE",
+            start_date=start_date,
+            end_date=end_date,
+            evaluation_as_of_date=evaluation_as_of_date,
+            allowed_symbols=allowed_symbols,
+            bucket_size=bucket_size,
+            step_observations=step_observations,
+            input_dataset_version=input_dataset_version,
+            database_path=settings.database_path,
+            daily_prices_directory=settings.data_dir / "daily_prices",
+            generated_at=datetime.now(UTC),
+        )
+    except duckdb.IOException as error:
+        raise typer.BadParameter(
+            "No canonical daily-price Parquet data exists yet."
+        ) from error
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+
+    if result.summary is None:
+        typer.echo("No completed ranking dates.")
+        return
+
     typer.echo(
-        f"Average rank spread | "
-        f"{result.average_forward_return_spread:.2%}"
+        "Ranking date | Top average return | Bottom average return | Rank spread"
     )
+    for observation in result.observations:
+        typer.echo(
+            f"{observation.ranking_date.isoformat()} | "
+            f"{observation.top_average_forward_return:.2%} | "
+            f"{observation.bottom_average_forward_return:.2%} | "
+            f"{observation.rank_spread:.2%}"
+        )
+
+    summary = result.summary
+    typer.echo(f"Ranking dates attempted | {summary.attempted_ranking_date_count}")
+    typer.echo(f"Ranking dates completed | {summary.completed_ranking_date_count}")
+    typer.echo(f"Positive rank spreads | {summary.positive_rank_spread_count}")
+    typer.echo(f"Rank-spread hit rate | {summary.rank_spread_hit_rate:.2%}")
+    typer.echo(f"Average rank spread | {summary.average_rank_spread:.2%}")
+    typer.echo(f"Median rank spread | {summary.median_rank_spread:.2%}")
+
 
 if __name__ == "__main__":
     app()

@@ -18,6 +18,13 @@ from core.data.recommendation_evaluation_ledger import (
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
 from core.models.ranking import MomentumRankedCandidate
+from core.models.ranking_backtest import (
+    MomentumRankingBacktestObservation,
+    MomentumRankingBacktestSummary,
+)
+from core.models.ranking_bucket_analytics import (
+    MomentumRankingBucketSummary,
+)
 from core.models.ranking_evaluation import MomentumRankingCandidateEvaluation
 from core.models.ranking_evaluation_analytics import (
     MomentumRankingActionSummary,
@@ -28,16 +35,16 @@ from core.models.ranking_snapshot import (
 )
 from core.models.recommendation_evaluation import RecommendationEvaluation
 from core.models.recommendations import PortfolioRecommendation
-from core.services.ranking_evaluation_recording import (
-    RankingEvaluationRecordingResult,
+from core.services.ranking_backtest import (
+    MomentumRankingBacktestResult,
 )
 from core.services.ranking_bucket_analytics import (
     RankingBucketAnalysisResult,
 )
-from core.services.ranking_snapshot import RankingSnapshotWriteResult
-from core.models.ranking_bucket_analytics import (
-    MomentumRankingBucketSummary,
+from core.services.ranking_evaluation_recording import (
+    RankingEvaluationRecordingResult,
 )
+from core.services.ranking_snapshot import RankingSnapshotWriteResult
 
 runner = CliRunner()
 
@@ -1030,7 +1037,7 @@ def test_prints_ranking_bucket_summary_via_cli(
         average_forward_return=Decimal("0.06"),
         median_forward_return=Decimal("0.06"),
         positive_return_count=2,
-        positive_return_rate=Decimal("1"),
+        positive_return_rate=Decimal(1),
         evaluation_as_of_date=date(2024, 2, 1),
         generated_at=datetime(2024, 2, 2, tzinfo=UTC),
     )
@@ -1045,7 +1052,7 @@ def test_prints_ranking_bucket_summary_via_cli(
         average_forward_return=Decimal("-0.03"),
         median_forward_return=Decimal("-0.03"),
         positive_return_count=0,
-        positive_return_rate=Decimal("0"),
+        positive_return_rate=Decimal(0),
         evaluation_as_of_date=date(2024, 2, 1),
         generated_at=datetime(2024, 2, 2, tzinfo=UTC),
     )
@@ -1086,6 +1093,7 @@ def test_prints_ranking_bucket_summary_via_cli(
     assert "TOP | 1-2 | 2 | 6.00% | 6.00% | 2/2 | 100.00%" in result.output
     assert "Average rank spread | 9.00%" in result.output
 
+
 def test_prints_no_completed_ranking_bucket_evaluations_via_cli(
     tmp_path: Path,
     monkeypatch,
@@ -1111,3 +1119,153 @@ def test_prints_no_completed_ranking_bucket_evaluations_via_cli(
 
     assert result.exit_code == 0, result.output
     assert "No completed ranking evaluations." in result.output
+
+
+def test_runs_ranking_momentum_backtest_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    data_dir = configure_test_settings(monkeypatch, tmp_path)
+    captured_arguments: dict[str, object] = {}
+
+    symbols_file = tmp_path / "universe.csv"
+    symbols_file.write_text(
+        "symbol\nALPHA\nBETA\n",
+        encoding="utf-8",
+    )
+
+    observation = MomentumRankingBacktestObservation(
+        strategy_name="baseline_momentum",
+        strategy_version="v1",
+        input_dataset_version="test-v1",
+        universe_hash="a" * 64,
+        ranking_date=date(2024, 1, 21),
+        evaluation_as_of_date=date(2024, 2, 10),
+        bucket_size=1,
+        top_rank_start=1,
+        top_rank_end=1,
+        bottom_rank_start=2,
+        bottom_rank_end=2,
+        top_completed_count=1,
+        bottom_completed_count=1,
+        top_average_forward_return=Decimal("0.10"),
+        bottom_average_forward_return=Decimal("-0.10"),
+        rank_spread=Decimal("0.20"),
+        top_positive_return_rate=Decimal(1),
+        bottom_positive_return_rate=Decimal(0),
+        generated_at=datetime(2024, 3, 2, tzinfo=UTC),
+    )
+    summary = MomentumRankingBacktestSummary(
+        strategy_name="baseline_momentum",
+        strategy_version="v1",
+        input_dataset_version="test-v1",
+        universe_hash="a" * 64,
+        start_date=date(2024, 1, 21),
+        end_date=date(2024, 1, 21),
+        bucket_size=1,
+        step_observations=20,
+        forward_horizon_observations=20,
+        attempted_ranking_date_count=1,
+        completed_ranking_date_count=1,
+        positive_rank_spread_count=1,
+        rank_spread_hit_rate=Decimal(1),
+        average_rank_spread=Decimal("0.20"),
+        median_rank_spread=Decimal("0.20"),
+        generated_at=datetime(2024, 3, 2, tzinfo=UTC),
+    )
+
+    def fake_run_backtest(**kwargs) -> MomentumRankingBacktestResult:
+        captured_arguments.update(kwargs)
+
+        return MomentumRankingBacktestResult(
+            observations=[observation],
+            summary=summary,
+            attempted_ranking_date_count=1,
+        )
+
+    monkeypatch.setattr(
+        "core.cli.resolve_symbol_universe",
+        lambda path: {"ALPHA", "BETA"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.cli.run_momentum_ranking_backtest",
+        fake_run_backtest,
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest-ranking-momentum",
+            "--start",
+            "2024-01-21",
+            "--end",
+            "2024-01-21",
+            "--evaluation-as-of",
+            "2024-02-10",
+            "--symbols-file",
+            str(symbols_file),
+            "--bucket-size",
+            "1",
+            "--input-dataset-version",
+            "test-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["allowed_symbols"] == {"ALPHA", "BETA"}
+    assert captured_arguments["start_date"] == date(2024, 1, 21)
+    assert captured_arguments["end_date"] == date(2024, 1, 21)
+    assert captured_arguments["evaluation_as_of_date"] == date(2024, 2, 10)
+    assert captured_arguments["bucket_size"] == 1
+    assert captured_arguments["daily_prices_directory"] == (data_dir / "daily_prices")
+    assert "2024-01-21 | 10.00% | -10.00% | 20.00%" in result.output
+    assert "Ranking dates attempted | 1" in result.output
+    assert "Rank-spread hit rate | 100.00%" in result.output
+
+
+def test_prints_no_completed_ranking_dates_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    symbols_file = tmp_path / "universe.csv"
+    symbols_file.write_text(
+        "symbol\nALPHA\nBETA\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "core.cli.resolve_symbol_universe",
+        lambda path: {"ALPHA", "BETA"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "core.cli.run_momentum_ranking_backtest",
+        lambda **kwargs: MomentumRankingBacktestResult(
+            observations=[],
+            summary=None,
+            attempted_ranking_date_count=3,
+        ),
+        raising=False,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "backtest-ranking-momentum",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-03-01",
+            "--evaluation-as-of",
+            "2024-04-01",
+            "--symbols-file",
+            str(symbols_file),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "No completed ranking dates." in result.output
