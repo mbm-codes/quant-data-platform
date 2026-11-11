@@ -1759,3 +1759,57 @@ def test_daily_refresh_exits_nonzero_when_quality_gate_fails(
     assert "Refresh status | FAILED" in result.output
     assert "Freshness status | STALE" in result.output
     assert "Quality status | HEALTHY" in result.output
+
+def test_prints_latest_daily_refresh_status_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    refresh_result = DailyRefreshResult(
+        run_id="daily-refresh-001",
+        status="COMPLETED",
+        started_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        files_discovered=2,
+        files_processed=2,
+        files_failed=0,
+        duplicate_files_skipped=0,
+        valid_rows=3_000,
+        rejected_rows=0,
+        freshness_status="FRESH",
+        quality_status="HEALTHY",
+    )
+
+    def fake_get_latest_daily_refresh_status(**_kwargs):
+        return refresh_result
+
+    monkeypatch.setattr(
+        "core.cli.get_latest_daily_refresh_status",
+        fake_get_latest_daily_refresh_status,
+    )
+
+    result = runner.invoke(app, ["daily-refresh-status"])
+
+    assert result.exit_code == 0, result.output
+    assert "Run ID | daily-refresh-001" in result.output
+    assert "Refresh status | COMPLETED" in result.output
+    assert "Freshness status | FRESH" in result.output
+    assert "Quality status | HEALTHY" in result.output
+    assert "Rows | 3000 valid | 0 rejected" in result.output
+
+def test_prints_missing_daily_refresh_status_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        "core.cli.get_latest_daily_refresh_status",
+        lambda **_kwargs: None,
+    )
+
+    result = runner.invoke(app, ["daily-refresh-status"])
+
+    assert result.exit_code == 0, result.output
+    assert "No daily refresh results exist yet." in result.output

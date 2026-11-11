@@ -30,6 +30,14 @@ def test_completes_when_data_is_fresh_and_quality_is_healthy(
     freshness_result = SimpleNamespace(status="FRESH")
     quality_result = SimpleNamespace(status="HEALTHY")
 
+    written_results = []
+    captured_ledger_arguments: dict[str, object] = {}
+
+    def fake_write_daily_refresh_ledger(results, output_directory):
+        written_results.extend(results)
+        captured_ledger_arguments["output_directory"] = output_directory
+        return [output_directory / "refresh_year=2026" / "example.parquet"]
+
     def fake_stage_bhavcopy_service(*_args, **kwargs):
         captured_arguments["stage"] = kwargs
         return staging_result
@@ -76,6 +84,10 @@ def test_completes_when_data_is_fresh_and_quality_is_healthy(
         "core.services.daily_refresh.emit_pipeline_log_event",
         fake_emit_pipeline_log_event,
     )
+    monkeypatch.setattr(
+        "core.services.daily_refresh.write_daily_refresh_ledger",
+        fake_write_daily_refresh_ledger,
+    )
 
     started_at = datetime(2026, 1, 20, 9, tzinfo=UTC)
 
@@ -84,6 +96,7 @@ def test_completes_when_data_is_fresh_and_quality_is_healthy(
         daily_prices_directory=tmp_path / "data" / "daily_prices",
         database_path=tmp_path / "qdp.duckdb",
         pipeline_runs_directory=tmp_path / "data" / "pipeline_runs",
+        daily_refreshes_directory=tmp_path / "data" / "daily_refreshes",
         run_id="daily-refresh-001",
         dataset_version="nse-bhavcopy-v1",
         ingested_at=started_at,
@@ -113,6 +126,11 @@ def test_completes_when_data_is_fresh_and_quality_is_healthy(
         ("pipeline_started", "RUNNING"),
         ("pipeline_completed", "COMPLETED"),
     ]
+
+    assert written_results == [result]
+    assert captured_ledger_arguments["output_directory"] == (
+        tmp_path / "data" / "daily_refreshes"
+    )
 
 def test_completes_with_warnings_when_quality_is_warning(
     tmp_path: Path,
@@ -164,6 +182,7 @@ def test_completes_with_warnings_when_quality_is_warning(
         daily_prices_directory=tmp_path / "data" / "daily_prices",
         database_path=tmp_path / "qdp.duckdb",
         pipeline_runs_directory=tmp_path / "data" / "pipeline_runs",
+        daily_refreshes_directory=tmp_path / "data" / "daily_refreshes",
         run_id="daily-refresh-002",
         dataset_version="nse-bhavcopy-v1",
         ingested_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
@@ -250,6 +269,7 @@ def test_fails_when_refresh_quality_gates_fail(
         daily_prices_directory=tmp_path / "data" / "daily_prices",
         database_path=tmp_path / "qdp.duckdb",
         pipeline_runs_directory=tmp_path / "data" / "pipeline_runs",
+                daily_refreshes_directory=tmp_path / "data" / "daily_refreshes",
         run_id="daily-refresh-003",
         dataset_version="nse-bhavcopy-v1",
         ingested_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
@@ -287,6 +307,12 @@ def test_records_failed_pipeline_run_when_staging_raises(
         captured_arguments["failed"] = kwargs
         return pipeline_run
 
+    written_results = []
+
+    def fake_write_daily_refresh_ledger(results, _output_directory):
+        written_results.extend(results)
+        return []
+
     monkeypatch.setattr(
         "core.services.daily_refresh.emit_pipeline_log_event",
         fake_emit_pipeline_log_event,
@@ -303,6 +329,10 @@ def test_records_failed_pipeline_run_when_staging_raises(
         "core.services.daily_refresh.fail_pipeline_run",
         fake_fail_pipeline_run,
     )
+    monkeypatch.setattr(
+        "core.services.daily_refresh.write_daily_refresh_ledger",
+        fake_write_daily_refresh_ledger,
+    )
 
     with pytest.raises(OSError, match="Unable to read bhavcopy source"):
         run_daily_refresh(
@@ -310,11 +340,17 @@ def test_records_failed_pipeline_run_when_staging_raises(
             daily_prices_directory=tmp_path / "data" / "daily_prices",
             database_path=tmp_path / "qdp.duckdb",
             pipeline_runs_directory=tmp_path / "data" / "pipeline_runs",
+            daily_refreshes_directory=tmp_path / "data" / "daily_refreshes",
             run_id="daily-refresh-failed-001",
             dataset_version="nse-bhavcopy-v1",
             ingested_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
             as_of_date=date(2026, 1, 20),
         )
+
+    assert len(written_results) == 1
+    assert written_results[0].status == "FAILED"
+    assert written_results[0].freshness_status == "MISSING"
+    assert written_results[0].quality_status == "MISSING"
 
     assert captured_arguments["start"]["run_id"] == "daily-refresh-failed-001"
     assert captured_arguments["failed"]["error_message"] == (

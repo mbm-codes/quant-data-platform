@@ -60,7 +60,9 @@ from core.services.universe import resolve_symbol_universe
 from core.services.data_freshness import get_daily_prices_freshness
 from core.services.pipeline_quality import get_pipeline_quality
 from core.services.daily_refresh import run_daily_refresh
-
+from core.services.daily_refresh_status import (
+    get_latest_daily_refresh_status,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1300,6 +1302,7 @@ def daily_refresh(
             daily_prices_directory=settings.data_dir / "daily_prices",
             database_path=settings.database_path,
             pipeline_runs_directory=settings.data_dir / "pipeline_runs",
+            daily_refreshes_directory=settings.data_dir / "daily_refreshes",
             run_id=run_id,
             dataset_version=dataset_version,
             ingested_at=datetime.now(UTC),
@@ -1322,6 +1325,30 @@ def daily_refresh(
 
     if result.status == "FAILED":
         raise typer.Exit(code=1)
+
+@app.command("daily-refresh-status")
+def daily_refresh_status() -> None:
+    """Show the most recently recorded daily-refresh outcome."""
+    settings = get_settings()
+
+    result = get_latest_daily_refresh_status(
+        database_path=settings.database_path,
+        daily_refreshes_directory=settings.data_dir / "daily_refreshes",
+    )
+
+    if result is None:
+        typer.echo("No daily refresh results exist yet.")
+        return
+
+    typer.echo(f"Run ID | {result.run_id}")
+    typer.echo(f"Refresh status | {result.status}")
+    typer.echo(f"Freshness status | {result.freshness_status}")
+    typer.echo(f"Quality status | {result.quality_status}")
+    typer.echo(
+        f"Rows | {result.valid_rows} valid | "
+        f"{result.rejected_rows} rejected"
+    )
+    typer.echo(f"Finished | {result.finished_at.isoformat()}")
 
 if __name__ == "__main__":
     logging.basicConfig(
