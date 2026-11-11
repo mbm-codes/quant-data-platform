@@ -66,6 +66,7 @@ from core.services.daily_refresh_status import (
 from core.services.daily_refresh_analytics import (
     get_daily_refresh_summary,
 )
+from core.services.daily_refresh_health import get_daily_refresh_health
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1380,6 +1381,38 @@ def daily_refresh_summary() -> None:
     typer.echo(f"Failed | {summary.failed_count}")
     typer.echo(f"Success rate | {summary.success_rate:.2%}")
     typer.echo(f"Latest successful refresh | {latest_successful_refresh}")
+
+@app.command("daily-refresh-health")
+def daily_refresh_health(
+    max_consecutive_failures: Annotated[
+        int,
+        typer.Option(min=1),
+    ] = 2,
+) -> None:
+    """Show actionable health for the daily-refresh workflow."""
+    settings = get_settings()
+
+    health = get_daily_refresh_health(
+        database_path=settings.database_path,
+        daily_refreshes_directory=settings.data_dir / "daily_refreshes",
+        max_consecutive_failures=max_consecutive_failures,
+        checked_at=datetime.now(UTC),
+    )
+
+    typer.echo(f"Health status | {health.status}")
+    typer.echo(f"Latest run ID | {health.latest_run_id or 'N/A'}")
+    typer.echo(
+        f"Latest refresh status | {health.latest_refresh_status or 'N/A'}"
+    )
+    typer.echo(
+        "Consecutive failures | "
+        f"{health.consecutive_failure_count}/"
+        f"{health.max_consecutive_failures}"
+    )
+    typer.echo(f"Reason | {health.reason}")
+
+    if health.status == "CRITICAL":
+        raise typer.Exit(code=1)
 
 if __name__ == "__main__":
     logging.basicConfig(

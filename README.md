@@ -376,3 +376,8 @@ uv run python -m core.cli daily-refresh-status
 
 ```bash
 uv run python -m core.cli daily-refresh-summary
+
+### Check daily-refresh health
+
+```bash
+uv run python -m core.cli daily-refresh-health
