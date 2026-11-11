@@ -63,6 +63,9 @@ from core.services.daily_refresh import run_daily_refresh
 from core.services.daily_refresh_status import (
     get_latest_daily_refresh_status,
 )
+from core.services.daily_refresh_analytics import (
+    get_daily_refresh_summary,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1349,6 +1352,34 @@ def daily_refresh_status() -> None:
         f"{result.rejected_rows} rejected"
     )
     typer.echo(f"Finished | {result.finished_at.isoformat()}")
+
+@app.command("daily-refresh-summary")
+def daily_refresh_summary() -> None:
+    """Show reliability metrics across recorded daily refreshes."""
+    settings = get_settings()
+
+    summary = get_daily_refresh_summary(
+        database_path=settings.database_path,
+        daily_refreshes_directory=settings.data_dir / "daily_refreshes",
+        generated_at=datetime.now(UTC),
+    )
+
+    if summary is None:
+        typer.echo("No daily refresh results exist yet.")
+        return
+
+    latest_successful_refresh = (
+        summary.latest_successful_finished_at.isoformat()
+        if summary.latest_successful_finished_at is not None
+        else "N/A"
+    )
+
+    typer.echo(f"Refreshes | {summary.total_refreshes}")
+    typer.echo(f"Completed | {summary.completed_count}")
+    typer.echo(f"Warnings | {summary.completed_with_warnings_count}")
+    typer.echo(f"Failed | {summary.failed_count}")
+    typer.echo(f"Success rate | {summary.success_rate:.2%}")
+    typer.echo(f"Latest successful refresh | {latest_successful_refresh}")
 
 if __name__ == "__main__":
     logging.basicConfig(

@@ -371,3 +371,8 @@ uv run python -m core.cli daily-refresh \
 
 ```bash
 uv run python -m core.cli daily-refresh-status
+
+### View daily-refresh reliability
+
+```bash
+uv run python -m core.cli daily-refresh-summary
