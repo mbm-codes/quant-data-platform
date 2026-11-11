@@ -17,6 +17,15 @@ from core.observability.pipeline_logging import emit_pipeline_log_event
 from core.services.backtest import backtest_momentum
 from core.services.bhavcopy_staging import stage_bhavcopy as stage_bhavcopy_service
 from core.services.csv_loader import load_csv as load_csv_service
+from core.services.daily_refresh import run_daily_refresh
+from core.services.daily_refresh_analytics import (
+    get_daily_refresh_summary,
+)
+from core.services.daily_refresh_health import get_daily_refresh_health
+from core.services.daily_refresh_status import (
+    get_latest_daily_refresh_status,
+)
+from core.services.data_freshness import get_daily_prices_freshness
 from core.services.evaluation_analytics import (
     summarize_recorded_evaluations,
 )
@@ -24,6 +33,7 @@ from core.services.historical_inventory import (
     inventory_historical as inventory_historical_service,
 )
 from core.services.historical_staging import stage_kaggle_historical_directory
+from core.services.pipeline_quality import get_pipeline_quality
 from core.services.pipeline_run_status import get_pipeline_run_status
 from core.services.pipeline_runs import (
     complete_pipeline_run,
@@ -57,16 +67,6 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
-from core.services.data_freshness import get_daily_prices_freshness
-from core.services.pipeline_quality import get_pipeline_quality
-from core.services.daily_refresh import run_daily_refresh
-from core.services.daily_refresh_status import (
-    get_latest_daily_refresh_status,
-)
-from core.services.daily_refresh_analytics import (
-    get_daily_refresh_summary,
-)
-from core.services.daily_refresh_health import get_daily_refresh_health
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1150,9 +1150,7 @@ def pipeline_run_status(
 def daily_prices_freshness(
     as_of: Annotated[str, typer.Option()],
     max_age_days: Annotated[int, typer.Option()] = 3,
-    input_dataset_version: Annotated[str, typer.Option()] = (
-        "nse-bhavcopy-v1"
-    ),
+    input_dataset_version: Annotated[str, typer.Option()] = ("nse-bhavcopy-v1"),
 ) -> None:
     """Check freshness of canonical daily-price data."""
     try:
@@ -1199,6 +1197,7 @@ def daily_prices_freshness(
     typer.echo(f"Actual age days | {actual_age_days}")
     typer.echo(f"Maximum age days | {freshness_result.max_age_days}")
 
+
 @app.command("pipeline-quality")
 def pipeline_quality(
     pipeline_name: Annotated[str, typer.Argument()],
@@ -1231,24 +1230,20 @@ def pipeline_quality(
             checked_at=datetime.now(UTC),
         )
     except duckdb.IOException as error:
-        raise typer.BadParameter(
-            "Unable to read pipeline-run records."
-        ) from error
+        raise typer.BadParameter("Unable to read pipeline-run records.") from error
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
 
     latest_run_id = quality_result.latest_run_id or "N/A"
     latest_run_status = quality_result.latest_run_status or "N/A"
     files = (
-        f"{quality_result.files_processed}/"
-        f"{quality_result.files_discovered}"
+        f"{quality_result.files_processed}/{quality_result.files_discovered}"
         if quality_result.files_processed is not None
         and quality_result.files_discovered is not None
         else "N/A"
     )
     rows = (
-        f"{quality_result.valid_rows} valid | "
-        f"{quality_result.rejected_rows} rejected"
+        f"{quality_result.valid_rows} valid | {quality_result.rejected_rows} rejected"
         if quality_result.valid_rows is not None
         and quality_result.rejected_rows is not None
         else "N/A"
@@ -1277,11 +1272,12 @@ def daily_refresh(
     run_id: Annotated[str, typer.Option()],
     as_of: Annotated[str, typer.Option()],
     dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
-    max_freshness_age_days: Annotated[int, typer.Option()] = 3,
-    warning_rejection_rate: Annotated[str, typer.Option()] = "0.01",
-    critical_rejection_rate: Annotated[str, typer.Option()] = "0.05",
+    max_freshness_age_days: Annotated[int | None, typer.Option()] = None,
+    warning_rejection_rate: Annotated[str | None, typer.Option()] = None,
+    critical_rejection_rate: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     """Stage bhavcopy data and validate its operational quality."""
+    settings = get_settings()
     try:
         as_of_date = date.fromisoformat(as_of)
     except ValueError as error:
@@ -1289,16 +1285,54 @@ def daily_refresh(
             "Use ISO format YYYY-MM-DD.",
             param_hint="--as-of",
         ) from error
+    warning_rejection_rate_text: str = (
+        warning_rejection_rate
+        if warning_rejection_rate is not None
+        else str(settings.daily_refresh_warning_rejection_rate)
+    )
+    critical_rejection_rate_text: str = (
+        critical_rejection_rate
+        if critical_rejection_rate is not None
+        else str(settings.daily_refresh_critical_rejection_rate)
+    )
 
     try:
-        warning_rate = Decimal(warning_rejection_rate)
-        critical_rate = Decimal(critical_rejection_rate)
+        warning_rate = Decimal(warning_rejection_rate_text)
+        critical_rate = Decimal(critical_rejection_rate_text)
+    except InvalidOperation as error:
+        raise typer.BadParameter(
+            "Rejection-rate thresholds must be decimal values."
+        ) from error
+    try:
+        warning_rate = Decimal(warning_rejection_rate_text)
+        critical_rate = Decimal(critical_rejection_rate_text)
     except InvalidOperation as error:
         raise typer.BadParameter(
             "Rejection-rate thresholds must be decimal values."
         ) from error
 
-    settings = get_settings()
+    effective_max_freshness_age_days = (
+        max_freshness_age_days
+        if max_freshness_age_days is not None
+        else settings.daily_refresh_max_freshness_age_days
+    )
+    warning_rejection_rate_text = (
+        warning_rejection_rate
+        if warning_rejection_rate is not None
+        else str(settings.daily_refresh_warning_rejection_rate)
+    )
+    critical_rejection_rate_text = (
+        critical_rejection_rate
+        if critical_rejection_rate is not None
+        else str(settings.daily_refresh_critical_rejection_rate)
+    )
+    try:
+        warning_rate = Decimal(warning_rejection_rate_text)
+        critical_rate = Decimal(critical_rejection_rate_text)
+    except InvalidOperation as error:
+        raise typer.BadParameter(
+            "Rejection-rate thresholds must be decimal values."
+        ) from error
 
     try:
         result = run_daily_refresh(
@@ -1311,7 +1345,7 @@ def daily_refresh(
             dataset_version=dataset_version,
             ingested_at=datetime.now(UTC),
             as_of_date=as_of_date,
-            max_freshness_age_days=max_freshness_age_days,
+            max_freshness_age_days=effective_max_freshness_age_days,
             warning_rejection_rate=warning_rate,
             critical_rejection_rate=critical_rate,
         )
@@ -1322,13 +1356,11 @@ def daily_refresh(
     typer.echo(f"Refresh status | {result.status}")
     typer.echo(f"Freshness status | {result.freshness_status}")
     typer.echo(f"Quality status | {result.quality_status}")
-    typer.echo(
-        f"Rows | {result.valid_rows} valid | "
-        f"{result.rejected_rows} rejected"
-    )
+    typer.echo(f"Rows | {result.valid_rows} valid | {result.rejected_rows} rejected")
 
     if result.status == "FAILED":
         raise typer.Exit(code=1)
+
 
 @app.command("daily-refresh-status")
 def daily_refresh_status() -> None:
@@ -1348,11 +1380,9 @@ def daily_refresh_status() -> None:
     typer.echo(f"Refresh status | {result.status}")
     typer.echo(f"Freshness status | {result.freshness_status}")
     typer.echo(f"Quality status | {result.quality_status}")
-    typer.echo(
-        f"Rows | {result.valid_rows} valid | "
-        f"{result.rejected_rows} rejected"
-    )
+    typer.echo(f"Rows | {result.valid_rows} valid | {result.rejected_rows} rejected")
     typer.echo(f"Finished | {result.finished_at.isoformat()}")
+
 
 @app.command("daily-refresh-summary")
 def daily_refresh_summary() -> None:
@@ -1382,28 +1412,33 @@ def daily_refresh_summary() -> None:
     typer.echo(f"Success rate | {summary.success_rate:.2%}")
     typer.echo(f"Latest successful refresh | {latest_successful_refresh}")
 
+
 @app.command("daily-refresh-health")
 def daily_refresh_health(
     max_consecutive_failures: Annotated[
-        int,
+        int | None,
         typer.Option(min=1),
-    ] = 2,
+    ] = None,
 ) -> None:
     """Show actionable health for the daily-refresh workflow."""
     settings = get_settings()
 
+    effective_max_consecutive_failures = (
+        max_consecutive_failures
+        if max_consecutive_failures is not None
+        else settings.daily_refresh_max_consecutive_failures
+    )
+
     health = get_daily_refresh_health(
         database_path=settings.database_path,
         daily_refreshes_directory=settings.data_dir / "daily_refreshes",
-        max_consecutive_failures=max_consecutive_failures,
+        max_consecutive_failures=effective_max_consecutive_failures,
         checked_at=datetime.now(UTC),
     )
 
     typer.echo(f"Health status | {health.status}")
     typer.echo(f"Latest run ID | {health.latest_run_id or 'N/A'}")
-    typer.echo(
-        f"Latest refresh status | {health.latest_refresh_status or 'N/A'}"
-    )
+    typer.echo(f"Latest refresh status | {health.latest_refresh_status or 'N/A'}")
     typer.echo(
         "Consecutive failures | "
         f"{health.consecutive_failure_count}/"
@@ -1413,6 +1448,7 @@ def daily_refresh_health(
 
     if health.status == "CRITICAL":
         raise typer.Exit(code=1)
+
 
 if __name__ == "__main__":
     logging.basicConfig(

@@ -17,6 +17,10 @@ from core.data.recommendation_evaluation_ledger import (
 )
 from core.data.recommendation_ledger import write_recommendation_ledger
 from core.models.daily_prices import DailyPrice
+from core.models.daily_refresh import DailyRefreshResult
+from core.models.daily_refresh_health import DailyRefreshHealth
+from core.models.data_freshness import DataFreshnessResult
+from core.models.pipeline_quality import PipelineQualityResult
 from core.models.pipeline_run import PipelineRun
 from core.models.ranking import MomentumRankedCandidate
 from core.models.ranking_backtest import (
@@ -46,15 +50,19 @@ from core.services.ranking_evaluation_recording import (
     RankingEvaluationRecordingResult,
 )
 from core.services.ranking_snapshot import RankingSnapshotWriteResult
-from core.models.data_freshness import DataFreshnessResult
-from core.models.pipeline_quality import PipelineQualityResult
-from core.models.daily_refresh import DailyRefreshResult
-from core.models.daily_refresh_health import DailyRefreshHealth
 
 runner = CliRunner()
 
 
-def configure_test_settings(monkeypatch, tmp_path: Path) -> Path:
+def configure_test_settings(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    daily_refresh_max_freshness_age_days: int = 3,
+    daily_refresh_warning_rejection_rate: Decimal = Decimal("0.01"),
+    daily_refresh_critical_rejection_rate: Decimal = Decimal("0.05"),
+    daily_refresh_max_consecutive_failures: int = 2,
+) -> Path:
     data_dir = tmp_path / "data"
 
     monkeypatch.setattr(
@@ -62,6 +70,14 @@ def configure_test_settings(monkeypatch, tmp_path: Path) -> Path:
         lambda: SimpleNamespace(
             data_dir=data_dir,
             database_path=tmp_path / "qdp.duckdb",
+            daily_refresh_max_freshness_age_days=(daily_refresh_max_freshness_age_days),
+            daily_refresh_warning_rejection_rate=(daily_refresh_warning_rejection_rate),
+            daily_refresh_critical_rejection_rate=(
+                daily_refresh_critical_rejection_rate
+            ),
+            daily_refresh_max_consecutive_failures=(
+                daily_refresh_max_consecutive_failures
+            ),
         ),
     )
 
@@ -1476,6 +1492,7 @@ def test_prints_pipeline_run_not_found_via_cli(
     assert result.exit_code == 0, result.output
     assert "Pipeline run not found." in result.output
 
+
 def test_prints_daily_prices_freshness_via_cli(
     tmp_path: Path,
     monkeypatch,
@@ -1520,13 +1537,12 @@ def test_prints_daily_prices_freshness_via_cli(
 
     assert result.exit_code == 0, result.output
     assert captured_arguments["as_of_date"] == date(2026, 1, 20)
-    assert captured_arguments["daily_prices_directory"] == (
-        data_dir / "daily_prices"
-    )
+    assert captured_arguments["daily_prices_directory"] == (data_dir / "daily_prices")
     assert "Dataset | daily_prices" in result.output
     assert "Status | FRESH" in result.output
     assert "Latest trade date | 2026-01-20" in result.output
     assert "Actual age days | 0" in result.output
+
 
 def test_prints_missing_daily_prices_freshness_via_cli(
     tmp_path: Path,
@@ -1562,6 +1578,7 @@ def test_prints_missing_daily_prices_freshness_via_cli(
     assert "Latest trade date | N/A" in result.output
     assert "Actual age days | N/A" in result.output
 
+
 def test_prints_pipeline_quality_via_cli(
     tmp_path: Path,
     monkeypatch,
@@ -1577,7 +1594,7 @@ def test_prints_pipeline_quality_via_cli(
         files_processed=1,
         valid_rows=1_818,
         rejected_rows=0,
-        rejection_rate=Decimal("0"),
+        rejection_rate=Decimal(0),
         warning_rejection_rate=Decimal("0.01"),
         critical_rejection_rate=Decimal("0.05"),
         status="HEALTHY",
@@ -1610,14 +1627,13 @@ def test_prints_pipeline_quality_via_cli(
 
     assert result.exit_code == 0, result.output
     assert captured_arguments["pipeline_name"] == "stage_bhavcopy"
-    assert captured_arguments["pipeline_runs_directory"] == (
-        data_dir / "pipeline_runs"
-    )
+    assert captured_arguments["pipeline_runs_directory"] == (data_dir / "pipeline_runs")
     assert captured_arguments["warning_rejection_rate"] == Decimal("0.01")
     assert captured_arguments["critical_rejection_rate"] == Decimal("0.05")
     assert "Pipeline | stage_bhavcopy" in result.output
     assert "Quality status | HEALTHY" in result.output
     assert "Rejection rate | 0.00%" in result.output
+
 
 def test_prints_missing_pipeline_quality_via_cli(
     tmp_path: Path,
@@ -1652,11 +1668,18 @@ def test_prints_missing_pipeline_quality_via_cli(
     assert "Latest run ID | N/A" in result.output
     assert "Rejection rate | N/A" in result.output
 
+
 def test_runs_daily_refresh_via_cli(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    configure_test_settings(monkeypatch, tmp_path)
+    configure_test_settings(
+        monkeypatch,
+        tmp_path,
+        daily_refresh_max_freshness_age_days=5,
+        daily_refresh_warning_rejection_rate=Decimal("0.02"),
+        daily_refresh_critical_rejection_rate=Decimal("0.10"),
+    )
     captured_arguments: dict[str, object] = {}
 
     refresh_result = DailyRefreshResult(
@@ -1710,6 +1733,10 @@ def test_runs_daily_refresh_via_cli(
     assert captured_arguments["as_of_date"] == date(2026, 1, 20)
     assert captured_arguments["dataset_version"] == "nse-bhavcopy-v1"
 
+    assert captured_arguments["max_freshness_age_days"] == 5
+    assert captured_arguments["warning_rejection_rate"] == Decimal("0.02")
+    assert captured_arguments["critical_rejection_rate"] == Decimal("0.10")
+
 
 def test_daily_refresh_exits_nonzero_when_quality_gate_fails(
     tmp_path: Path,
@@ -1761,6 +1788,7 @@ def test_daily_refresh_exits_nonzero_when_quality_gate_fails(
     assert "Freshness status | STALE" in result.output
     assert "Quality status | HEALTHY" in result.output
 
+
 def test_prints_latest_daily_refresh_status_via_cli(
     tmp_path: Path,
     monkeypatch,
@@ -1799,6 +1827,7 @@ def test_prints_latest_daily_refresh_status_via_cli(
     assert "Quality status | HEALTHY" in result.output
     assert "Rows | 3000 valid | 0 rejected" in result.output
 
+
 def test_prints_missing_daily_refresh_status_via_cli(
     tmp_path: Path,
     monkeypatch,
@@ -1815,11 +1844,16 @@ def test_prints_missing_daily_refresh_status_via_cli(
     assert result.exit_code == 0, result.output
     assert "No daily refresh results exist yet." in result.output
 
+
 def test_prints_daily_refresh_health_via_cli(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    configure_test_settings(monkeypatch, tmp_path)
+    configure_test_settings(
+        monkeypatch,
+        tmp_path,
+        daily_refresh_max_consecutive_failures=3,
+    )
 
     health = DailyRefreshHealth(
         status="HEALTHY",
@@ -1827,12 +1861,14 @@ def test_prints_daily_refresh_health_via_cli(
         latest_refresh_status="COMPLETED",
         latest_finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
         consecutive_failure_count=0,
-        max_consecutive_failures=2,
+        max_consecutive_failures=3,
         reason="Latest daily refresh completed successfully.",
         checked_at=datetime(2026, 1, 20, 9, 3, tzinfo=UTC),
     )
+    captured_arguments: dict[str, object] = {}
 
-    def fake_get_daily_refresh_health(**_kwargs):
+    def fake_get_daily_refresh_health(**kwargs):
+        captured_arguments.update(kwargs)
         return health
 
     monkeypatch.setattr(
@@ -1845,8 +1881,10 @@ def test_prints_daily_refresh_health_via_cli(
     assert result.exit_code == 0, result.output
     assert "Health status | HEALTHY" in result.output
     assert "Latest run ID | daily-refresh-001" in result.output
-    assert "Consecutive failures | 0/2" in result.output
+    assert "Consecutive failures | 0/3" in result.output
     assert "Reason | Latest daily refresh completed successfully." in result.output
+    assert captured_arguments["max_consecutive_failures"] == 3
+
 
 def test_daily_refresh_health_exits_nonzero_when_critical(
     tmp_path: Path,
@@ -1874,3 +1912,67 @@ def test_daily_refresh_health_exits_nonzero_when_critical(
 
     assert result.exit_code == 1
     assert "Health status | CRITICAL" in result.output
+
+
+def test_daily_refresh_cli_options_override_configured_policy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(
+        monkeypatch,
+        tmp_path,
+        daily_refresh_max_freshness_age_days=5,
+        daily_refresh_warning_rejection_rate=Decimal("0.02"),
+        daily_refresh_critical_rejection_rate=Decimal("0.10"),
+    )
+    captured_arguments: dict[str, object] = {}
+
+    refresh_result = DailyRefreshResult(
+        run_id="daily-refresh-override-001",
+        status="COMPLETED",
+        started_at=datetime(2026, 1, 20, 9, tzinfo=UTC),
+        finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        files_discovered=1,
+        files_processed=1,
+        files_failed=0,
+        duplicate_files_skipped=0,
+        valid_rows=1_000,
+        rejected_rows=0,
+        freshness_status="FRESH",
+        quality_status="HEALTHY",
+    )
+
+    def fake_run_daily_refresh(**kwargs):
+        captured_arguments.update(kwargs)
+        return refresh_result
+
+    monkeypatch.setattr(
+        "core.cli.run_daily_refresh",
+        fake_run_daily_refresh,
+    )
+
+    source_directory = tmp_path / "source"
+    source_directory.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "daily-refresh",
+            str(source_directory),
+            "--run-id",
+            "daily-refresh-override-001",
+            "--as-of",
+            "2026-01-20",
+            "--max-freshness-age-days",
+            "1",
+            "--warning-rejection-rate",
+            "0.03",
+            "--critical-rejection-rate",
+            "0.15",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured_arguments["max_freshness_age_days"] == 1
+    assert captured_arguments["warning_rejection_rate"] == Decimal("0.03")
+    assert captured_arguments["critical_rejection_rate"] == Decimal("0.15")
