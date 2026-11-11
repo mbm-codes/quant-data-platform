@@ -51,3 +51,36 @@ def load_latest_daily_refresh(
     return DailyRefreshResult.model_validate(
         dict(zip(_DAILY_REFRESH_COLUMNS, row, strict=True))
     )
+
+
+def load_daily_refreshes(
+    connection: duckdb.DuckDBPyConnection,
+) -> list[DailyRefreshResult]:
+    """Return all persisted daily-refresh results in finish-time order."""
+    rows = connection.execute(
+        """
+        SELECT
+            run_id,
+            status,
+            started_at,
+            finished_at,
+            files_discovered,
+            files_processed,
+            files_failed,
+            duplicate_files_skipped,
+            valid_rows,
+            rejected_rows,
+            freshness_status,
+            quality_status,
+            error_message
+        FROM daily_refreshes
+        ORDER BY finished_at, run_id
+        """
+    ).fetchall()
+
+    return [
+        DailyRefreshResult.model_validate(
+            dict(zip(_DAILY_REFRESH_COLUMNS, row, strict=True))
+        )
+        for row in rows
+    ]
