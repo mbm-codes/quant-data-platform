@@ -366,3 +366,8 @@ uv run python -m core.cli daily-refresh \
   --run-id daily-refresh-001 \
   --as-of 2026-01-20 \
   --dataset-version nse-bhavcopy-v1
+
+### View the latest daily-refresh outcome
+
+```bash
+uv run python -m core.cli daily-refresh-status

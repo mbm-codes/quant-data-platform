@@ -16,6 +16,7 @@ from core.services.pipeline_runs import (
     fail_pipeline_run,
     start_pipeline_run,
 )
+from core.data.daily_refresh_ledger import write_daily_refresh_ledger
 
 DailyRefreshStatus = Literal[
     "COMPLETED",
@@ -30,6 +31,7 @@ def run_daily_refresh(
     daily_prices_directory: Path,
     database_path: Path,
     pipeline_runs_directory: Path,
+    daily_refreshes_directory: Path,
     run_id: str,
     dataset_version: str,
     ingested_at: datetime,
@@ -98,6 +100,27 @@ def run_daily_refresh(
                 error_message=str(error),
             )
         )
+
+        failed_result = DailyRefreshResult(
+            run_id=run_id,
+            status="FAILED",
+            started_at=ingested_at,
+            finished_at=failed_at,
+            files_discovered=0,
+            files_processed=0,
+            files_failed=0,
+            duplicate_files_skipped=0,
+            valid_rows=0,
+            rejected_rows=0,
+            freshness_status="MISSING",
+            quality_status="MISSING",
+            error_message=str(error),
+        )
+
+        write_daily_refresh_ledger(
+            [failed_result],
+            daily_refreshes_directory,
+        )
         raise
     checked_at = datetime.now(UTC)
     complete_pipeline_run(
@@ -159,7 +182,7 @@ def run_daily_refresh(
         )
     )
 
-    return DailyRefreshResult(
+    result = DailyRefreshResult(
         run_id=run_id,
         status=status,
         started_at=ingested_at,
@@ -174,6 +197,12 @@ def run_daily_refresh(
         quality_status=quality_result.status,
         error_message=error_message,
     )
+    write_daily_refresh_ledger(
+        [result],
+        daily_refreshes_directory,
+    )
+
+    return result
 
 
 def _determine_refresh_outcome(

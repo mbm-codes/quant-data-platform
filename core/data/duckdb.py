@@ -156,3 +156,23 @@ def register_pipeline_runs_view(
         );
         """
     )
+
+def register_daily_refreshes_view(
+    connection: duckdb.DuckDBPyConnection,
+    daily_refreshes_directory: Path,
+) -> None:
+    """Expose immutable daily-refresh results as a DuckDB view."""
+    parquet_glob = (
+        daily_refreshes_directory / "refresh_year=*" / "*.parquet"
+    ).as_posix().replace("'", "''")
+
+    connection.execute(
+        f"""
+        CREATE OR REPLACE VIEW daily_refreshes AS
+        SELECT *
+        FROM read_parquet(
+            '{parquet_glob}',
+            hive_partitioning = true
+        );
+        """
+    )
