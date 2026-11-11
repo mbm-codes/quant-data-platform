@@ -381,3 +381,13 @@ uv run python -m core.cli daily-refresh-summary
 
 ```bash
 uv run python -m core.cli daily-refresh-health
+
+### Configure daily-refresh policy
+
+Daily-refresh defaults can be overridden with environment variables:
+
+```bash
+export QDP_DAILY_REFRESH_MAX_FRESHNESS_AGE_DAYS=3
+export QDP_DAILY_REFRESH_WARNING_REJECTION_RATE=0.01
+export QDP_DAILY_REFRESH_CRITICAL_REJECTION_RATE=0.05
+export QDP_DAILY_REFRESH_MAX_CONSECUTIVE_FAILURES=2
