@@ -49,6 +49,7 @@ from core.services.ranking_snapshot import RankingSnapshotWriteResult
 from core.models.data_freshness import DataFreshnessResult
 from core.models.pipeline_quality import PipelineQualityResult
 from core.models.daily_refresh import DailyRefreshResult
+from core.models.daily_refresh_health import DailyRefreshHealth
 
 runner = CliRunner()
 
@@ -1813,3 +1814,63 @@ def test_prints_missing_daily_refresh_status_via_cli(
 
     assert result.exit_code == 0, result.output
     assert "No daily refresh results exist yet." in result.output
+
+def test_prints_daily_refresh_health_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    health = DailyRefreshHealth(
+        status="HEALTHY",
+        latest_run_id="daily-refresh-001",
+        latest_refresh_status="COMPLETED",
+        latest_finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        consecutive_failure_count=0,
+        max_consecutive_failures=2,
+        reason="Latest daily refresh completed successfully.",
+        checked_at=datetime(2026, 1, 20, 9, 3, tzinfo=UTC),
+    )
+
+    def fake_get_daily_refresh_health(**_kwargs):
+        return health
+
+    monkeypatch.setattr(
+        "core.cli.get_daily_refresh_health",
+        fake_get_daily_refresh_health,
+    )
+
+    result = runner.invoke(app, ["daily-refresh-health"])
+
+    assert result.exit_code == 0, result.output
+    assert "Health status | HEALTHY" in result.output
+    assert "Latest run ID | daily-refresh-001" in result.output
+    assert "Consecutive failures | 0/2" in result.output
+    assert "Reason | Latest daily refresh completed successfully." in result.output
+
+def test_daily_refresh_health_exits_nonzero_when_critical(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    health = DailyRefreshHealth(
+        status="CRITICAL",
+        latest_run_id="daily-refresh-002",
+        latest_refresh_status="FAILED",
+        latest_finished_at=datetime(2026, 1, 20, 9, 2, tzinfo=UTC),
+        consecutive_failure_count=2,
+        max_consecutive_failures=2,
+        reason="Consecutive daily-refresh failure limit reached: 2.",
+        checked_at=datetime(2026, 1, 20, 9, 3, tzinfo=UTC),
+    )
+
+    monkeypatch.setattr(
+        "core.cli.get_daily_refresh_health",
+        lambda **_kwargs: health,
+    )
+
+    result = runner.invoke(app, ["daily-refresh-health"])
+
+    assert result.exit_code == 1
+    assert "Health status | CRITICAL" in result.output
