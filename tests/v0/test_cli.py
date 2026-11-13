@@ -40,6 +40,7 @@ from core.models.ranking_snapshot import (
 )
 from core.models.recommendation_evaluation import RecommendationEvaluation
 from core.models.recommendations import PortfolioRecommendation
+from core.models.daily_price_coverage import DailyPriceCoverage
 from core.services.ranking_backtest import (
     MomentumRankingBacktestResult,
 )
@@ -1976,3 +1977,50 @@ def test_daily_refresh_cli_options_override_configured_policy(
     assert captured_arguments["max_freshness_age_days"] == 1
     assert captured_arguments["warning_rejection_rate"] == Decimal("0.03")
     assert captured_arguments["critical_rejection_rate"] == Decimal("0.15")
+
+def test_prints_daily_price_coverage_via_cli(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    configure_test_settings(monkeypatch, tmp_path)
+
+    coverage = DailyPriceCoverage(
+        exchange="NSE",
+        dataset_version="test-v1",
+        total_rows=1_000,
+        distinct_symbols=25,
+        first_trade_date=date(2024, 1, 1),
+        last_trade_date=date(2024, 12, 31),
+        duplicate_business_key_count=0,
+        generated_at=datetime(2026, 1, 1, 9, tzinfo=UTC),
+    )
+
+    captured_arguments: dict[str, object] = {}
+
+    def fake_get_daily_price_coverage(**kwargs):
+        captured_arguments.update(kwargs)
+        return coverage
+
+    monkeypatch.setattr(
+        "core.cli.get_daily_price_coverage",
+        fake_get_daily_price_coverage,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "daily-prices-coverage",
+            "--dataset-version",
+            "test-v1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Exchange | NSE" in result.output
+    assert "Dataset version | test-v1" in result.output
+    assert "Rows | 1000" in result.output
+    assert "Distinct symbols | 25" in result.output
+    assert "Trade dates | 2024-01-01 to 2024-12-31" in result.output
+    assert "Duplicate business keys | 0" in result.output
+    assert captured_arguments["exchange"] == "NSE"
+    assert captured_arguments["dataset_version"] == "test-v1"
