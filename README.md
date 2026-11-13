@@ -391,3 +391,9 @@ export QDP_DAILY_REFRESH_MAX_FRESHNESS_AGE_DAYS=3
 export QDP_DAILY_REFRESH_WARNING_REJECTION_RATE=0.01
 export QDP_DAILY_REFRESH_CRITICAL_REJECTION_RATE=0.05
 export QDP_DAILY_REFRESH_MAX_CONSECUTIVE_FAILURES=2
+
+### Inspect daily-price coverage
+
+```bash
+uv run python -m core.cli daily-prices-coverage \
+  --dataset-version nse-bhavcopy-v1

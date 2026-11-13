@@ -67,6 +67,7 @@ from core.services.recommendation_recording import (
     generate_and_record_momentum_recommendation,
 )
 from core.services.universe import resolve_symbol_universe
+from core.services.daily_price_coverage import get_daily_price_coverage
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -1449,6 +1450,41 @@ def daily_refresh_health(
     if health.status == "CRITICAL":
         raise typer.Exit(code=1)
 
+
+@app.command("daily-prices-coverage")
+def daily_prices_coverage(
+    dataset_version: Annotated[str, typer.Option()] = "nse-bhavcopy-v1",
+) -> None:
+    """Report canonical daily-price coverage for one dataset version."""
+    settings = get_settings()
+
+    coverage = get_daily_price_coverage(
+        exchange="NSE",
+        dataset_version=dataset_version,
+        database_path=settings.database_path,
+        daily_prices_directory=settings.data_dir / "daily_prices",
+        generated_at=datetime.now(UTC),
+    )
+
+    trade_dates = (
+        f"{coverage.first_trade_date.isoformat()} to "
+        f"{coverage.last_trade_date.isoformat()}"
+        if (
+            coverage.first_trade_date is not None
+            and coverage.last_trade_date is not None
+        )
+        else "N/A"
+    )
+
+    typer.echo(f"Exchange | {coverage.exchange}")
+    typer.echo(f"Dataset version | {coverage.dataset_version}")
+    typer.echo(f"Rows | {coverage.total_rows}")
+    typer.echo(f"Distinct symbols | {coverage.distinct_symbols}")
+    typer.echo(f"Trade dates | {trade_dates}")
+    typer.echo(
+        "Duplicate business keys | "
+        f"{coverage.duplicate_business_key_count}"
+    )
 
 if __name__ == "__main__":
     logging.basicConfig(
