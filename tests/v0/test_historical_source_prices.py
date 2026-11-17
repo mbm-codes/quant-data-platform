@@ -15,6 +15,7 @@ def valid_source_record() -> dict:
         "source_symbol": "reliance.ns",
         "symbol": "reliance",
         "source_file": "RELIANCE.NS.csv.gz",
+        "source_hash": "test-source-hash",
         "source_timestamp": datetime(1996, 1, 1, tzinfo=IST),
         "trade_date": date(1996, 1, 1),
         "open_price": Decimal("10.403049590832516"),

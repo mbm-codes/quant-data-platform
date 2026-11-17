@@ -16,6 +16,7 @@ HISTORICAL_STAGING_SCHEMA = pa.schema(
         pa.field("source_symbol", pa.string(), nullable=False),
         pa.field("symbol", pa.string(), nullable=False),
         pa.field("source_file", pa.string(), nullable=False),
+        pa.field("source_hash", pa.string(), nullable=False),
         pa.field("source_timestamp", pa.timestamp("us", tz="UTC"), nullable=False),
         pa.field("trade_date", pa.date32(), nullable=False),
         pa.field("open_price", pa.decimal128(20, 8), nullable=False),

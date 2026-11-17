@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -48,7 +49,13 @@ def test_writes_staging_and_quarantine_parquet(tmp_path: Path) -> None:
 
     assert len(staging_paths) == 1
     assert len(quarantine_paths) == 1
-    assert pq.read_table(staging_paths[0]).num_rows == 1
+    staging_table = pq.read_table(staging_paths[0])
+
+    assert staging_table.num_rows == 1
+    assert (
+        staging_table.to_pylist()[0]["source_hash"]
+        == hashlib.sha256(source_path.read_bytes()).hexdigest()
+    )
     assert pq.read_table(quarantine_paths[0]).num_rows == 1
 
     quarantine_row = pq.read_table(quarantine_paths[0]).to_pylist()[0]
@@ -63,4 +70,3 @@ def test_writes_staging_and_quarantine_parquet(tmp_path: Path) -> None:
     )
 
     assert repeated_staging_paths == staging_paths
-    assert pq.read_table(staging_paths[0]).num_rows == 1

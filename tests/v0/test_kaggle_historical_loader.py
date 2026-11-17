@@ -1,4 +1,5 @@
 import gzip
+import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -47,6 +48,9 @@ def test_loads_kaggle_historical_gzip_file(tmp_path: Path) -> None:
     assert records[0].close_price == Decimal("15.41237259")
     assert records[0].dividends == Decimal("0.00000000")
     assert records[0].stock_splits == Decimal("0.00000000")
+    assert (
+        records[0].source_hash == hashlib.sha256(source_path.read_bytes()).hexdigest()
+    )
 
 
 def test_quarantines_invalid_rows_and_retains_valid_rows(tmp_path: Path) -> None:

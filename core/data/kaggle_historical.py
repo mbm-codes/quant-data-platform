@@ -1,5 +1,6 @@
 import csv
 import gzip
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -58,6 +59,7 @@ def load_kaggle_historical_file_with_rejections(
     """Load one source file, retaining valid rows and quarantining invalid rows."""
     source_symbol = _source_symbol_from_filename(path)
     symbol = source_symbol.removesuffix(".NS")
+    source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
 
     with gzip.open(path, mode="rt", encoding="utf-8", newline="") as source_file:
         reader = csv.DictReader(source_file)
@@ -81,6 +83,7 @@ def load_kaggle_historical_file_with_rejections(
                             "source_symbol": source_symbol,
                             "symbol": symbol,
                             "source_file": path.name,
+                            "source_hash": source_hash,
                             "source_timestamp": source_timestamp,
                             "trade_date": source_timestamp.astimezone(IST).date(),
                             "open_price": normalize_price(row["Open"]),
