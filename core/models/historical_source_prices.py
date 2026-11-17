@@ -15,6 +15,7 @@ class HistoricalSourcePrice(BaseModel):
     source_symbol: str = Field(min_length=1)
     symbol: str = Field(min_length=1)
     source_file: str = Field(min_length=1)
+    source_hash: str = Field(min_length=1)
 
     source_timestamp: datetime
     trade_date: date
