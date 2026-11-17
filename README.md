@@ -397,3 +397,15 @@ export QDP_DAILY_REFRESH_MAX_CONSECUTIVE_FAILURES=2
 ```bash
 uv run python -m core.cli daily-prices-coverage \
   --dataset-version nse-bhavcopy-v1
+
+  ## V0 snapshot acceptance checklist
+
+The checked-in NSE bhavcopy snapshot currently ends on `2026-01-20`.
+Use that date for a reproducible V0 acceptance run. This is a local snapshot
+check, not evidence that the dataset is current today.
+
+Choose a new, unused run ID:
+
+```bash
+export QDP_RUN_ID="v0-acceptance-001"
+
